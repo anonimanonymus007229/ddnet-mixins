@@ -41,6 +41,8 @@ jobs:
           ref: c0e6703fbcdbe03df2f26875427ec3951ce4ec21
           path: workspace/dependencies/ddnet-libs
       - uses: dtolnay/rust-toolchain@stable
+      - name: Test dependency symlink materialization on Windows
+        run: cargo test -p mixins-build --test dependency_links --locked -- --nocapture
       - run: cargo run --release --locked -- build --workspace workspace --ddnet workspace/ddnet --mods examples --libraries workspace/dependencies/ddnet-libs --build-dir workspace/build-ddmix --cmake-arg=-DVIDEORECORDER=OFF --cmake-arg=-DVULKAN=OFF --cmake-arg=-DSERVER=OFF --cmake-arg=-DTOOLS=OFF --cmake-arg=-DDOWNLOAD_GTEST=OFF --cmake-arg=-DPREFER_BUNDLED_LIBS=ON
       - uses: actions/upload-artifact@v4
         with:

@@ -17,8 +17,10 @@ this is not a lockfile for the complete external mod/source environment.
 
 Apply copies original DDNet files (excluding root `.git`) into a fresh sibling
 transaction, renders edits there, then publishes `.ddmix` with renames. No hard
-links or symlinks are used. All input symlinks/nonregular files fail before
-copying. Mod files remain in their original directories. Conflicting logical
+links or symlinks are created in staging. Source/mod symlinks and nonregular
+files fail before copying. The optional external dependency tree has a separate
+read-only policy: internal file/directory symlinks are resolved and copied as
+ordinary files/directories; escaping, broken and cyclic links are rejected. Mod files remain in their original directories. Conflicting logical
 overlay paths and overlays shadowing original DDNet files fail explicitly.
 
 `.ddmix` contains:
@@ -95,7 +97,13 @@ ddmix build --workspace workspace --ddnet workspace/ddnet --mods examples --libr
 ```
 
 The optional libraries directory is validated and copied into staged ddnet-libs,
-not symlinked or installed globally. Existing populated dependencies are not
+not symlinked or installed globally. Official SDL framework links (including
+chained links and Git-for-Windows links ending in a separator) are materialized
+as independent files/directories. Each resolved target must stay inside the
+canonical dependency root. Cycles, broken links and excessive expansion fail
+before the staging transaction starts. Git metadata is excluded. This does not
+relax the prohibition on links in mod inputs, editable DDNet sources or output
+inventory. Existing populated dependencies are not
 overridden. Build subprocesses disable Python bytecode writes so upstream build
 scripts do not pollute the staged inventory with __pycache__. A separate CMake
 probe verifies generated source/include/checksum properties and paths with spaces.

@@ -107,7 +107,7 @@ target scopes, plus multiple helpers with collision-free names.
 A separate CMake runtime probe compiles and executes HEAD/TAIL helpers: int&
 forwarding mutates original state and bare helper return does not exit the target.
 
-The regular suite has 41 passing tests; explicit corpus tests cover config
+The regular suite has 44 passing tests; explicit corpus tests cover config
 collisions, real component lowering/diff and real advanced selectors in addition
 to earlier scans/staging. Release packaging workflow covers Windows x86_64,
 Linux x86_64, macOS Intel/ARM64 but has not been run remotely. A local Windows
@@ -132,6 +132,19 @@ successfully linked game-client (`target/reports/logging-native-recovery.log`).
 This confirms the staged source still builds under reduced compiler parallelism;
 the successful nine-stage CLI log path is covered separately by the compiled
 fixture. Cross-platform terminal/CI behavior remains pending remote execution. See [logging](logging.md).
+
+The Windows CI dependency-copy failure at sdl/include/mac was reproduced with
+an isolated `core.symlinks=true` checkout of pinned ddnet-libs (13 tracked links).
+The dependency copier now materializes contained links, including nested SDL
+framework links and trailing-separator links that native Windows canonicalize
+cannot follow directly. Regression tests use actual Windows symlinks and cover
+independent copies, repeated apply, external escapes, broken targets and cycles.
+The reproduced build passed all nine stages and linked the complete Release
+client at `workspace/link-build/Release/DDNet.exe` in 139.571s, copying 2,872
+materialized dependency files (no symlinks in staging).
+Log: `target/reports/dependency-fix-build.stderr`. Source/mod symlink rejection
+remains unchanged. CI now explicitly runs these dependency regression tests before
+the real Windows DDNet build.
 
 Remaining: no complete C++ semantic AST, macro expansion, arbitrary nested call
 rewrites or complex return control-flow transformation. Advanced aliases have

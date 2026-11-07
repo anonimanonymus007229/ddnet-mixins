@@ -1,5 +1,6 @@
 //! Read-only planning and isolated, tool-owned staging publication.
 mod components;
+mod dependencies;
 use mixins_core::progress::{Event, Observer};
 use mixins_transform::{Edit, Plan};
 use serde::{Deserialize, Serialize};
@@ -489,7 +490,7 @@ pub fn apply_observed(
     let libraries = libraries.map(|p| io(p.canonicalize())).transpose()?;
     let dependency_files = libraries
         .as_ref()
-        .map(|p| regular_tree(p, true))
+        .map(|p| dependencies::snapshot(p, observe))
         .transpose()?;
     let workspace = io(workspace.canonicalize())?;
     let ddnet = io(ddnet.canonicalize())?;
@@ -588,14 +589,14 @@ pub fn apply_observed(
             });
         }
     }
-    if let (Some(libs), Some(files)) = (&libraries, dependency_files) {
+    if let Some(entries) = dependency_files {
         let destination = staged.join("ddnet-libs");
         if destination.exists() && !regular_tree(&destination, false)?.is_empty() {
             return Err(
                 "DDNet already contains bundled dependencies; refusing external override".into(),
             );
         }
-        let total = files.len();
+        let total = entries.iter().filter(|e| !e.directory).count();
         observe(Event::Count {
             name: "dependency files",
             value: total,
@@ -603,16 +604,33 @@ pub fn apply_observed(
         observe(Event::Info(format!(
             "Copying {total} bundled dependency files"
         )));
-        for (n, relative) in files.into_iter().enumerate() {
-            let path = destination.join(&relative);
+        let mut copied = 0;
+        for entry in entries {
+            let path = destination.join(&entry.relative);
+            if entry.directory {
+                io(fs::create_dir_all(&path))?;
+                continue;
+            }
             io(fs::create_dir_all(
                 path.parent().ok_or("dependency parent missing")?,
             ))?;
-            io(fs::copy(libs.join(relative), path))?;
-            if (n + 1) % 100 == 0 || n + 1 == total {
+            // Snapshot paths are canonicalized. Revalidate before copying to catch
+            // an input replaced since discovery (hostile concurrent mutation is unsupported).
+            let root = libraries.as_ref().ok_or("dependency root missing")?;
+            let source = io(entry.source.canonicalize())?;
+            if !source.starts_with(root) {
+                return Err(format!(
+                    "dependency path escaped root while copying: {}",
+                    source.display()
+                ));
+            }
+            io(fs::copy(source, &path))
+                .map_err(|e| format!("dependency {}: {e}", entry.relative.display()))?;
+            copied += 1;
+            if copied % 100 == 0 || copied == total {
                 observe(Event::Progress {
                     name: "dependencies",
-                    done: n + 1,
+                    done: copied,
                     total,
                 });
             }
