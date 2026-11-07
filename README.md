@@ -1,8 +1,8 @@
 # DDNet Mixins
 
 Rust tooling for independent DDNet mods without editing the upstream checkout.
-**Early implementation: discovery and lexical inspection only.** This is not yet
-an injection tool or a buildable mod integration release.
+**Early implementation: discovery, conservative structural indexing and read-only
+source edit planning.** Staging/build integration is not implemented yet.
 
 ## Build and run
 
@@ -15,12 +15,15 @@ ddmix init mods/my-mod
 ddmix list --workspace ./workspace
 ddmix list --mods ./workspace/mods
 ddmix inspect --ddnet ./workspace/ddnet > corpus.json
+ddmix locate --file ./workspace/ddnet/src/game/client/gameclient.cpp --function CGameClient::OnInit
+ddmix plan --ddnet ./workspace/ddnet --mods ./examples > plan.json
+ddmix check --ddnet ./workspace/ddnet --mods ./examples
 ```
 
 `init` requires an existing parent directory and refuses an existing destination.
-`list` and `inspect` are read-only and emit JSON. Errors return a nonzero exit
-status. `inspect` reports lexical errors and delimiter errors in unconditional
-files, **not** C++ semantic validity or selector safety.
+`list`, `inspect`, `locate`, `plan` and `check` are read-only and emit JSON.
+Errors return a nonzero exit status. `inspect` reports structural coverage and
+source-located unsupported regions, **not** complete C++ semantic validity.
 
 ## Implemented
 
@@ -34,9 +37,11 @@ files, **not** C++ semantic validity or selector safety.
 - Project-owned C++ lexer: exact byte spans and line/column positions, trivia,
   comments, prefixed/escaped/raw literals, numbers, operators, continued
   directives, conditional nesting validation.
-- Symmetric delimiter maps for unconditional files. Conditional files are marked
-  `conditional_pairing_deferred` and contain no delimiter pairs. No branch is
-  assumed active and no cross-branch edit is considered safe.
+- Branch-aware structural delimiter maps, conservative qualified function/class
+  definitions, exact body boundaries and overload-aware lookup.
+- Generic INSERT/REPLACE/REMOVE planner, function/comment targets, restricted
+  class-body inserts, conflict checks and deterministic same-offset ordering.
+- HEAD/TAIL aliases lower to generic edits. See [edit semantics](docs/edits.md).
 
 Example `mixin.toml`:
 
@@ -55,14 +60,15 @@ ddnet = "*"
 ```
 
 Only `*` version constraints are currently accepted. Unknown manifest fields
-(including unimplemented edits, injections and components) fail rather than being
-silently ignored. Mod sources remain in their own `src/` trees.
+(including unimplemented components) fail rather than being silently ignored.
+Edits and HEAD/TAIL injections are supported for read-only planning; see
+`examples/basic-hooks/mixin.toml`. Mod sources remain in their own `src/` trees.
 
 ## Validation
 
 ```sh
 cargo test --workspace
-cargo test -p mixins-lexer --test ddnet_corpus -- --ignored --nocapture
+cargo test --workspace -- --ignored --nocapture
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 

@@ -1,0 +1,11 @@
+[package]
+name = "mixins-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mixins-core.workspace = true
+mixins-lexer.workspace = true
+serde.workspace = true

@@ -69,6 +69,7 @@ fn cycles_missing_dependencies_unknown_fields_and_versions_fail() {
             .contains("cycle")
     );
     for extra in [
+        "[[components]]\nclass = 'CTest'",
         "[[edits]]\naction = 'INSERT'",
         "[compatibility]\nddnet = '>=20'",
     ] {

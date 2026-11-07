@@ -12,6 +12,8 @@ rust-version = "1.85"
 mixins-core = { path = "crates/mixins-core" }
 mixins-manifest = { path = "crates/mixins-manifest" }
 mixins-lexer = { path = "crates/mixins-lexer" }
+mixins-parser = { path = "crates/mixins-parser" }
+mixins-transform = { path = "crates/mixins-transform" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

@@ -1,0 +1,40 @@
+[mod]
+id = "basic-hooks"
+name = "Read-only planning example"
+version = "0.1.0"
+
+[compatibility]
+ddnet = "*"
+
+[[injections]]
+id = "init-head"
+file = "src/game/client/gameclient.cpp"
+target = "CGameClient::OnInit"
+parameters = "()"
+kind = "HEAD"
+content = '''
+
+	// Example HEAD injection.
+'''
+
+[[injections]]
+id = "init-tail"
+file = "src/game/client/gameclient.cpp"
+target = "CGameClient::OnInit"
+parameters = "()"
+kind = "TAIL"
+content = '''
+
+	// Example TAIL injection (lexical end, not every return).
+'''
+
+[[edits]]
+id = "config-declaration"
+file = "src/engine/shared/config_variables.h"
+action = "INSERT"
+target = { kind = "comment", text = "Add config variables for mods below this comment" }
+position = "AFTER"
+content = '''
+
+MACRO_CONFIG_INT(ClDdmixExample, cl_ddmix_example, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Example")
+'''

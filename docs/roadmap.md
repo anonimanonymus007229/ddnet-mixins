@@ -1,8 +1,9 @@
 # Engineering roadmap
 
 The supplied project specification (`LLM.md`, November 2026 development session)
-is the design baseline. This first commit establishes phases 1–2 only, not the
-specification's first useful release.
+is the design baseline. Discovery/lexing and an initial conservative structural
+index/read-only edit planner are implemented; this is not the specification's
+first useful release.
 
 ## Next: structural parsing
 
@@ -37,7 +38,8 @@ specification's first useful release.
 - Config insertions use the parsed reserved comment; detect duplicate IDs.
 - Configure and build the staged client, including a real declared component.
 
-Only init/list/inspect are exposed today. plan/check/apply/build must not be
-advertised until their safety contracts are implemented and integration-tested.
+init/list/inspect/locate and source-only plan/check are exposed today.
+apply/build remain unavailable until staging and CMake integration contracts
+are implemented and tested.
 Advanced aliases, semver constraints, non-client target mapping, distribution
 artifacts and comprehensive platform testing remain future work.

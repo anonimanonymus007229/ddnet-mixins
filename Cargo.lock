@@ -152,6 +152,8 @@ dependencies = [
  "mixins-core",
  "mixins-lexer",
  "mixins-manifest",
+ "mixins-parser",
+ "mixins-transform",
  "serde",
  "serde_json",
 ]
@@ -176,8 +178,27 @@ name = "mixins-manifest"
 version = "0.1.0"
 dependencies = [
  "mixins-core",
+ "mixins-transform",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "mixins-parser"
+version = "0.1.0"
+dependencies = [
+ "mixins-core",
+ "mixins-lexer",
+ "serde",
+]
+
+[[package]]
+name = "mixins-transform"
+version = "0.1.0"
+dependencies = [
+ "mixins-lexer",
+ "mixins-parser",
+ "serde",
 ]
 
 [[package]]

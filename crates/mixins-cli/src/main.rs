@@ -27,7 +27,31 @@ enum Commands {
         #[arg(long)]
         mods: Option<PathBuf>,
     },
-    /// Scan real DDNet sources. Outputs lexical diagnostics, not an AST or safe edit plan.
+    /// Resolve edits, detect conflicts and emit original-span patches (no writes).
+    Plan {
+        #[arg(long)]
+        ddnet: PathBuf,
+        #[arg(long)]
+        mods: PathBuf,
+    },
+    /// Validate exactly the same non-destructive transformation plan.
+    Check {
+        #[arg(long)]
+        ddnet: PathBuf,
+        #[arg(long)]
+        mods: PathBuf,
+    },
+    /// Resolve one supported function definition in a source file, without editing it.
+    Locate {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        function: String,
+        /// Exact parenthesized parameters to disambiguate overloads.
+        #[arg(long)]
+        parameters: Option<String>,
+    },
+    /// Scan real DDNet sources and report conservative structural-index coverage.
     Inspect {
         #[arg(long)]
         ddnet: PathBuf,
@@ -39,7 +63,10 @@ struct FileReport {
     bytes: usize,
     tokens: usize,
     paired_delimiters: usize,
-    conditional_pairing_deferred: bool,
+    functions: usize,
+    classes: usize,
+    unsupported_regions: usize,
+    unsupported: Vec<mixins_core::Diagnostic>,
     diagnostics: Vec<mixins_core::Diagnostic>,
 }
 #[derive(Serialize)]
@@ -52,6 +79,9 @@ struct Report {
     bytes: usize,
     tokens: usize,
     conditional_files: usize,
+    functions: usize,
+    classes: usize,
+    unsupported_regions: usize,
     diagnostic_count: usize,
     files: Vec<FileReport>,
 }
@@ -82,6 +112,76 @@ fn run(cli: Cli) -> Result<bool, String> {
             );
             Ok(true)
         }
+        Commands::Plan { ddnet, mods } | Commands::Check { ddnet, mods } => {
+            let ddnet = ddnet.canonicalize().map_err(|e| e.to_string())?;
+            if !ddnet.join("CMakeLists.txt").is_file() {
+                return Err("DDNet root requires CMakeLists.txt".into());
+            }
+            let mods = mixins_manifest::discover(&mods)?;
+            let mut grouped: std::collections::BTreeMap<
+                String,
+                Vec<(String, mixins_transform::Edit)>,
+            > = std::collections::BTreeMap::new();
+            for m in &mods {
+                let mut edits = m.manifest.edits.clone();
+                edits.extend(m.manifest.injections.iter().map(|i| i.lower()));
+                edits.sort_by(|a, b| (a.priority, &a.id).cmp(&(b.priority, &b.id)));
+                for edit in edits {
+                    grouped
+                        .entry(edit.file.clone())
+                        .or_default()
+                        .push((m.manifest.package.id.clone(), edit));
+                }
+            }
+            let mut plans = std::collections::BTreeMap::new();
+            for (file, edits) in grouped {
+                // Reject symlink components, even if canonicalization would stay
+                // inside DDNet. Future staging must not mutate their targets.
+                let mut path = ddnet.clone();
+                for component in file.split('/') {
+                    path.push(component);
+                    if fs::symlink_metadata(&path)
+                        .map_err(|e| format!("{}: {e}", path.display()))?
+                        .file_type()
+                        .is_symlink()
+                    {
+                        return Err(format!("symlink edit path forbidden: {}", path.display()));
+                    }
+                }
+                if !path
+                    .canonicalize()
+                    .map_err(|e| e.to_string())?
+                    .starts_with(&ddnet)
+                {
+                    return Err(format!("path escapes DDNet: {file}"));
+                }
+                let source =
+                    fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                let refs: Vec<_> = edits.iter().map(|(id, e)| (id.as_str(), e)).collect();
+                let plan = mixins_transform::Plan::resolve(&source, &refs)?;
+                plan.render(&source)?;
+                plans.insert(file, plan);
+            }
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "schema_version": 1, "stage": "source-edits-only", "files": plans, "cmake_integration_validated": false })).map_err(|e| e.to_string())?);
+            Ok(true)
+        }
+        Commands::Locate {
+            file,
+            function,
+            parameters,
+        } => {
+            let source =
+                fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let index = mixins_parser::parse(&source, &mixins_lexer::lex(&source));
+            let node = index
+                .select_function(&function, parameters.as_deref(), &source)
+                .map_err(|e| format!("{}: {e}", file.display()))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(node).map_err(|e| e.to_string())?
+            );
+            Ok(true)
+        }
         Commands::Inspect { ddnet } => {
             let ddnet = ddnet
                 .canonicalize()
@@ -98,14 +198,17 @@ fn run(cli: Cli) -> Result<bool, String> {
                 .filter(|o| o.status.success())
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
             let mut report = Report {
-                schema_version: 1,
-                stage: "lexer-only",
+                schema_version: 2,
+                stage: "conservative-structural-index",
                 ddnet: ddnet.clone(),
                 revision,
                 files_scanned: 0,
                 bytes: 0,
                 tokens: 0,
                 conditional_files: 0,
+                functions: 0,
+                classes: 0,
+                unsupported_regions: 0,
                 diagnostic_count: 0,
                 files: Vec::new(),
             };
@@ -116,7 +219,12 @@ fn run(cli: Cli) -> Result<bool, String> {
                 report.bytes += source.len();
                 report.tokens += lexed.tokens.len();
                 report.conditional_files += usize::from(lexed.conditional);
-                report.diagnostic_count += lexed.diagnostics.len();
+                let index = mixins_parser::parse(&source, &lexed);
+                let structure = mixins_parser::structure(&source, &lexed);
+                report.diagnostic_count += index.diagnostics.len();
+                report.functions += index.functions.len();
+                report.classes += index.classes.len();
+                report.unsupported_regions += index.unsupported.len();
                 report.files.push(FileReport {
                     file: file
                         .strip_prefix(&ddnet)
@@ -125,9 +233,12 @@ fn run(cli: Cli) -> Result<bool, String> {
                         .replace('\\', "/"),
                     bytes: source.len(),
                     tokens: lexed.tokens.len(),
-                    paired_delimiters: lexed.pairs.iter().flatten().count() / 2,
-                    conditional_pairing_deferred: lexed.conditional,
-                    diagnostics: lexed.diagnostics,
+                    paired_delimiters: structure.pairs.iter().flatten().count() / 2,
+                    functions: index.functions.len(),
+                    classes: index.classes.len(),
+                    unsupported_regions: index.unsupported.len(),
+                    unsupported: index.unsupported,
+                    diagnostics: index.diagnostics,
                 });
             }
             report.files_scanned = report.files.len();

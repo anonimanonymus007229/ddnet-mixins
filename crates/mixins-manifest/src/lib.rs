@@ -14,6 +14,10 @@ pub struct Manifest {
     #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
     pub compatibility: Option<Compatibility>,
+    #[serde(default)]
+    pub edits: Vec<mixins_transform::Edit>,
+    #[serde(default)]
+    pub injections: Vec<mixins_transform::Injection>,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -72,6 +76,31 @@ pub fn load(path: &Path) -> Result<Manifest, String> {
             "{}: only wildcard (*) compatibility/dependency versions are currently supported",
             path.display()
         ));
+    }
+    let mut ids = BTreeSet::new();
+    for (id, file) in m
+        .edits
+        .iter()
+        .map(|e| (&e.id, &e.file))
+        .chain(m.injections.iter().map(|e| (&e.id, &e.file)))
+    {
+        if !valid_id(id) || !ids.insert(id) {
+            return Err(format!(
+                "{}: invalid or duplicate edit ID {id}",
+                path.display()
+            ));
+        }
+        if file.contains('\\')
+            || !file.starts_with("src/")
+            || file
+                .split('/')
+                .any(|s| s.is_empty() || s == "." || s == ".." || s.contains(':'))
+        {
+            return Err(format!(
+                "{}: edit path must be a normalized src/... path: {file}",
+                path.display()
+            ));
+        }
     }
     Ok(m)
 }
