@@ -33,6 +33,9 @@ enum Commands {
         ddnet: PathBuf,
         #[arg(long)]
         mods: PathBuf,
+        /// Print a unified diff instead of JSON.
+        #[arg(long)]
+        diff: bool,
     },
     /// Validate exactly the same non-destructive transformation plan.
     Check {
@@ -61,6 +64,9 @@ enum Commands {
         /// Existing-parent build directory outside .ddmix and the input checkout.
         #[arg(long)]
         build_dir: PathBuf,
+        /// Separate ddnet-libs checkout to copy into staging only.
+        #[arg(long)]
+        libraries: Option<PathBuf>,
         /// Additional configure arguments, e.g. --cmake-arg=-DHEADLESS_CLIENT=ON.
         #[arg(long, allow_hyphen_values = true)]
         cmake_arg: Vec<String>,
@@ -88,6 +94,7 @@ struct FileReport {
     tokens: usize,
     paired_delimiters: usize,
     functions: usize,
+    declarations: usize,
     classes: usize,
     unsupported_regions: usize,
     unsupported: Vec<mixins_core::Diagnostic>,
@@ -136,7 +143,21 @@ fn run(cli: Cli) -> Result<bool, String> {
             );
             Ok(true)
         }
-        Commands::Plan { ddnet, mods } | Commands::Check { ddnet, mods } => {
+        Commands::Plan {
+            ddnet,
+            mods,
+            diff: true,
+        } => {
+            let plan = mixins_build::plan(&ddnet, &mods)?;
+            print!("{}", plan.diff(&ddnet)?);
+            Ok(true)
+        }
+        Commands::Plan {
+            ddnet,
+            mods,
+            diff: false,
+        }
+        | Commands::Check { ddnet, mods } => {
             let plan = mixins_build::plan(&ddnet, &mods)?;
             println!(
                 "{}",
@@ -158,6 +179,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             ddnet,
             mods,
             build_dir,
+            libraries,
             cmake_arg,
         } => {
             let workspace = workspace.canonicalize().map_err(|e| e.to_string())?;
@@ -187,13 +209,19 @@ fn run(cli: Cli) -> Result<bool, String> {
             }) {
                 return Err("unsafe/reserved CMake argument".into());
             }
-            let staged = mixins_build::apply(&workspace, &ddnet, &mods)?;
+            let staged = mixins_build::apply_with_dependencies(
+                &workspace,
+                &ddnet,
+                &mods,
+                libraries.as_deref(),
+            )?;
             let status = Command::new("cmake")
                 .arg("-S")
                 .arg(mixins_build::cmake_path(&staged)?)
                 .arg("-B")
                 .arg(mixins_build::cmake_path(&build_dir)?)
                 .args(cmake_arg)
+                .env("PYTHONDONTWRITEBYTECODE", "1")
                 // Avoid discovering the unrelated Mixins parent Git repository.
                 .env(
                     "GIT_CEILING_DIRECTORIES",
@@ -212,6 +240,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                 .arg("--build")
                 .arg(mixins_build::cmake_path(&build_dir)?)
                 .args(["--target", "game-client", "--config", "Release"])
+                .env("PYTHONDONTWRITEBYTECODE", "1")
                 .env(
                     "GIT_CEILING_DIRECTORIES",
                     mixins_build::cmake_path(&workspace.join(".ddmix/staging"))?,
@@ -293,6 +322,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                     tokens: lexed.tokens.len(),
                     paired_delimiters: structure.pairs.iter().flatten().count() / 2,
                     functions: index.functions.len(),
+                    declarations: index.declarations.len(),
                     classes: index.classes.len(),
                     unsupported_regions: index.unsupported.len(),
                     unsupported: index.unsupported,

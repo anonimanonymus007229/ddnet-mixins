@@ -9,7 +9,8 @@ ddmix check --ddnet workspace/ddnet --mods examples
 Both `plan` and `check` resolve all enabled mods' source edits against original
 sources, detect conflicts, validate structural CMake placement/overlay mapping,
 and emit the same JSON plan. Neither writes DDNet, staging, or generated state.
-They do not execute CMake or a compiler or check duplicate config identifiers.
+They do not execute CMake or a compiler. Rendered config edits are checked for
+identifier/console-name collisions, respecting exclusive preprocessor arms.
 `apply` uses the plan in an isolated copy; `build` runs CMake against it. See
 [staging](staging.md).
 
@@ -40,12 +41,15 @@ omit position. Every edit has a unique lowercase/hyphenated `id`, a normalized
 and HEAD or TAIL `kind`; `parameters` and `priority` are optional. HEAD lowers
 to INSERT/BODY_START and TAIL to INSERT/BODY_END. **TAIL is the lexical body
 end, not execution before every return.** No return interception is implied.
+See [advanced aliases](advanced-injections.md) for the separate RETURN, call,
+body overwrite and explicit-block wrap operations.
 
 ## Ordering, conflicts and preservation
 
 Dependency order precedes ascending numeric priority and stable edit ID within
 a mod. Same-offset inserts are rendered in that order. Overlapping replacement
-or removal ranges fail, as do inserts on or inside their boundaries. Edits
+or removal ranges fail, as do inserts strictly inside them. Boundary inserts
+are allowed and ordered before/after the replacement at its start/end. Edits
 resolve before rendering; source spans never refer to already-modified text.
 Content is verbatim, with no implicit newline, indentation or newline-style
 conversion. Unchanged bytes are retained exactly. Snippets targeting CRLF files
@@ -54,12 +58,14 @@ should supply CRLF if uniform line endings are desired.
 ## Safety and limitations
 
 The parser handles common qualified definitions, simple namespaces/classes,
-constructors/destructors without initializers, and common member qualifiers.
+constructors/destructors and common member qualifiers.
 It skips bodies structurally, so nested lambdas/control flow are not confused
-with top-level definitions. Declaration-only functions are not indexed yet.
-Templates, ctor initializer lists, operator functions, trailing returns,
-complex declarators, anonymous namespaces and macro-decorated declarations
-are not fully supported and are reported as source-located unsupported regions.
+with top-level definitions. Declaration-only/defaulted/deleted methods are indexed
+separately; edit selectors still select definitions with real bodies.
+Simple template heads/types, common operators, noexcept expressions, trailing
+returns and parenthesized ctor initializer lists now have initial support.
+Complex declarators, braced ctor initializers, anonymous namespaces and many
+macro-decorated declarations remain unsupported and are source-located.
 The count is an inventory of skipped regions, not necessarily invalid C++.
 
 Branch-local delimiters are paired without choosing active macros. Branches

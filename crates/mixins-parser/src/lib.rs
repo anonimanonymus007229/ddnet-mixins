@@ -1,5 +1,6 @@
 //! Conservative structural index, not a complete C++ grammar.
 //! Unsupported declaration bodies are reported and never searched as declarations.
+pub mod syntax;
 use mixins_core::Diagnostic;
 use mixins_lexer::{Kind, Lexed, Token};
 use serde::Serialize;
@@ -20,6 +21,13 @@ pub struct Function {
     pub conditional: bool,
 }
 #[derive(Debug, Clone, Serialize)]
+pub struct FunctionDeclaration {
+    pub qualified_name: String,
+    pub declaration: Span,
+    pub parameters: Span,
+    pub line: u32,
+}
+#[derive(Debug, Clone, Serialize)]
 pub struct Class {
     pub qualified_name: String,
     pub body: Span,
@@ -28,6 +36,7 @@ pub struct Class {
 #[derive(Debug, Serialize)]
 pub struct Index {
     pub functions: Vec<Function>,
+    pub declarations: Vec<FunctionDeclaration>,
     pub classes: Vec<Class>,
     pub diagnostics: Vec<Diagnostic>,
     pub unsupported: Vec<Diagnostic>,
@@ -168,10 +177,53 @@ impl Parser<'_> {
         diagnostic.end = self.token(end).end;
         self.index.unsupported.push(diagnostic);
     }
+    /// Contextual template/type argument list; never used on expressions.
+    fn angle_end(&self, start: usize, end: usize) -> Option<usize> {
+        if self.word(start) != "<" {
+            return None;
+        }
+        let mut depth = 0usize;
+        let mut p = start;
+        while p < end {
+            match self.word(p) {
+                "<" => depth += 1,
+                ">" => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(p);
+                    }
+                }
+                ">>" => {
+                    depth = depth.checked_sub(2)?;
+                    if depth == 0 {
+                        return Some(p);
+                    }
+                }
+                "(" | "[" => {
+                    p = self.close(p)?;
+                }
+                ";" | "{" | "}" | "=" => return None,
+                _ => {}
+            }
+            p += 1;
+        }
+        None
+    }
     fn scope(&mut self, start: usize, end: usize, scope: &str) {
         let mut p = start;
         let mut begin = start;
         while p < end {
+            let w = self.word(p);
+            if w == ";" && self.function(begin, p, p, scope) {
+                if let Some(f) = self.index.functions.pop() {
+                    self.index.declarations.push(FunctionDeclaration {
+                        qualified_name: f.qualified_name,
+                        declaration: f.declaration,
+                        parameters: f.parameters,
+                        line: f.line,
+                    });
+                }
+            }
             let w = self.word(p);
             if self.token(p).kind == Kind::Directive
                 || w == ";"
@@ -198,7 +250,12 @@ impl Parser<'_> {
                     // otherwise masquerade as top-level functions/classes.
                     return;
                 };
-                let header: Vec<String> = (begin..p).map(|q| self.word(q).to_owned()).collect();
+                let head = if self.word(begin) == "template" && begin + 1 < p {
+                    self.angle_end(begin + 1, p).map_or(begin, |n| n + 1)
+                } else {
+                    begin
+                };
+                let header: Vec<String> = (head..p).map(|q| self.word(q).to_owned()).collect();
                 let class_head = header
                     .first()
                     .is_some_and(|h| matches!(h.as_str(), "class" | "struct" | "union"));
@@ -258,13 +315,44 @@ impl Parser<'_> {
             return false;
         }
         let mut q = begin;
+        if self.word(q) == "template" {
+            let Some(end) = self.angle_end(q + 1, body) else {
+                return false;
+            };
+            q = end + 1;
+        }
+        let declaration_start = q;
         let mut parameters = None;
         while q < body {
             if matches!(
                 self.word(q),
-                "=" | "[" | "<" | ">" | "operator" | "template" | "typedef" | "using" | "return"
+                "=" | "[" | ">" | "template" | "typedef" | "using" | "return"
             ) {
                 return false;
+            }
+            if self.word(q) == "<" {
+                let Some(end) = self.angle_end(q, body) else {
+                    return false;
+                };
+                q = end + 1;
+                continue;
+            }
+            if self.word(q) == "operator" {
+                q += 1;
+                if q >= body {
+                    return false;
+                }
+                if matches!(self.word(q), "(" | "[") {
+                    let Some(end) = self.close(q) else {
+                        return false;
+                    };
+                    q = end + 1;
+                } else {
+                    q += 1;
+                }
+                if q >= body || self.word(q) != "(" {
+                    return false;
+                }
             }
             if self.word(q) == "(" {
                 parameters = Some(q);
@@ -278,10 +366,14 @@ impl Parser<'_> {
         let Some(param_close) = self.close(open).filter(|c| *c < body) else {
             return false;
         };
-        if open == begin || self.token(open - 1).kind != Kind::Identifier {
+        if open == declaration_start {
             return false;
         }
-        let mut name_start = open - 1;
+        let operator = (declaration_start..open).find(|&i| self.word(i) == "operator");
+        if operator.is_none() && self.token(open - 1).kind != Kind::Identifier {
+            return false;
+        }
+        let mut name_start = operator.unwrap_or(open - 1);
         if name_start > begin && self.word(name_start - 1) == "~" {
             name_start -= 1;
         }
@@ -306,17 +398,78 @@ impl Parser<'_> {
         if name_start == begin && !constructor {
             return false;
         }
-        // Initial support deliberately refuses ctor initializers/trailing returns,
-        // attributes, noexcept expressions, and unknown suffix macros.
-        if (param_close + 1..body).any(|i| {
-            !matches!(
-                self.word(i),
+        let mut suffix = param_close + 1;
+        while suffix < body
+            && matches!(
+                self.word(suffix),
                 "const" | "volatile" | "noexcept" | "override" | "final" | "&" | "&&"
             )
-        }) {
+        {
+            let noexcept = self.word(suffix) == "noexcept";
+            suffix += 1;
+            if noexcept && suffix < body && self.word(suffix) == "(" {
+                let Some(end) = self.close(suffix) else {
+                    return false;
+                };
+                suffix = end + 1;
+            }
+        }
+        if suffix < body && self.word(suffix) == "->" {
+            suffix += 1;
+            while suffix < body {
+                if self.word(suffix) == "<" {
+                    let Some(end) = self.angle_end(suffix, body) else {
+                        return false;
+                    };
+                    suffix = end + 1;
+                } else if self.token(suffix).kind == Kind::Identifier
+                    || matches!(self.word(suffix), "::" | "*" | "&" | "&&")
+                {
+                    suffix += 1;
+                } else {
+                    return false;
+                }
+            }
+        }
+        if suffix < body && constructor && self.word(suffix) == ":" {
+            suffix += 1;
+            loop {
+                if suffix >= body || self.token(suffix).kind != Kind::Identifier {
+                    return false;
+                }
+                suffix += 1;
+                while suffix < body && self.word(suffix) == "::" {
+                    suffix += 2;
+                }
+                if suffix >= body || !matches!(self.word(suffix), "(" | "{") {
+                    return false;
+                }
+                let Some(end) = self.close(suffix) else {
+                    return false;
+                };
+                suffix = end + 1;
+                if suffix == body {
+                    break;
+                }
+                if self.word(suffix) != "," {
+                    return false;
+                }
+                suffix += 1;
+            }
+        }
+        if body == close
+            && suffix + 2 == body
+            && self.word(suffix) == "="
+            && matches!(self.word(suffix + 1), "0" | "default" | "delete")
+        {
+            suffix = body;
+        }
+        if suffix != body {
             return false;
         }
-        if (begin..name_start).any(|i| matches!(self.word(i), ":" | ")" | "(" | "{" | "}")) {
+        if (declaration_start..name_start)
+            .any(|i| matches!(self.word(i), ":" | ")" | "(" | "{" | "}"))
+        {
             return false;
         }
         self.index.functions.push(Function {
@@ -361,6 +514,7 @@ pub fn parse(source: &str, lexed: &Lexed) -> Index {
         positions,
         index: Index {
             functions: vec![],
+            declarations: vec![],
             classes: vec![],
             diagnostics,
             unsupported: vec![],

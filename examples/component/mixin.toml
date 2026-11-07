@@ -1,0 +1,10 @@
+[mod]
+id = "component-example"
+name = "Component lifecycle example"
+version = "0.1.0"
+
+[[components]]
+class = "CDdmixExample"
+header = "game/client/components/ddmix_example.h"
+member = "m_DdmixExample"
+register_in = ["all", "input"]

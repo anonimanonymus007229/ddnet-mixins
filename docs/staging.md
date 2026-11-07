@@ -81,9 +81,18 @@ not preserve original Git revision metadata; a future worktree/metadata mode is
 needed for that. Manual CMake users should set `GIT_CEILING_DIRECTORIES` to the
 staging parent for equivalent behavior.
 
-Local configure detected MSVC successfully, then failed due to missing Curl,
-SQLite3, libpng, Freetype, Ogg, Opus, Opusfile and SDL2. Dependencies were not
-installed or downloaded automatically. Full DDNet configure/build remains
-unverified. A separate third-party-dependency-free CMake configure test (requiring
-a C++ compiler) verifies generated
-source/include/checksum properties on a target, including paths with spaces.
+Full Release configuration/build was validated locally with MSVC and a separate
+pinned ddnet-libs checkout, including a declared component. To reproduce without
+modifying the original checkout's empty submodule directory:
+
+```sh
+git clone --depth 1 https://github.com/ddnet/ddnet-libs.git workspace/dependencies/ddnet-libs
+# Tested dependency revision: c0e6703fbcdbe03df2f26875427ec3951ce4ec21
+ddmix build --workspace workspace --ddnet workspace/ddnet --mods examples --libraries workspace/dependencies/ddnet-libs --build-dir workspace/build-ddmix --cmake-arg=-DVIDEORECORDER=OFF --cmake-arg=-DSERVER=OFF --cmake-arg=-DTOOLS=OFF --cmake-arg=-DDOWNLOAD_GTEST=OFF --cmake-arg=-DVULKAN=OFF --cmake-arg=-DPREFER_BUNDLED_LIBS=ON
+```
+
+The optional libraries directory is validated and copied into staged ddnet-libs,
+not symlinked or installed globally. Existing populated dependencies are not
+overridden. Build subprocesses disable Python bytecode writes so upstream build
+scripts do not pollute the staged inventory with __pycache__. A separate CMake
+probe verifies generated source/include/checksum properties and paths with spaces.

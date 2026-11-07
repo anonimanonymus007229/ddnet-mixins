@@ -4,7 +4,7 @@ Create DDNet mods as separate packages and apply them without editing the origin
 
 `ddmix` reads TOML manifests, inserts code into supported C++ functions or around comments, and connects mod-owned client sources to DDNet's CMake target. It prepares a separate working copy for compilation, so mod developers can keep their changes outside upstream source files.
 
-**Early development:** source transformations and isolated application are tested against real DDNet. Full client compilation remains unverified locally because DDNet dependencies are missing. Declarative component registration is not implemented yet.
+**Early development:** transformations, component registration and isolated application are tested against real DDNet. A Windows Release client with the example mods has been compiled locally. The C++ parser remains conservative; unsupported constructs fail rather than being guessed.
 
 ## Quick start
 
@@ -31,6 +31,7 @@ The native executable is `target/release/ddmix.exe` on Windows or `target/releas
 Check the example, then apply it to a separate working copy:
 
 ```sh
+ddmix plan --ddnet workspace/ddnet --mods examples --diff
 ddmix check --ddnet workspace/ddnet --mods examples
 ddmix apply --workspace workspace --ddnet workspace/ddnet --mods examples
 ```
@@ -45,7 +46,7 @@ With DDNet's compiler, CMake and third-party dependencies installed, configure a
 ddmix build --workspace workspace --ddnet workspace/ddnet --mods examples --build-dir workspace/build-ddmix
 ```
 
-`build` runs `apply` first, then CMake configuration and the `game-client` build. It does not install dependencies. Extra cache settings use `--cmake-arg=-DNAME=VALUE`; keep build output outside `.ddmix` and the original checkout. See the [staging and build guide](docs/staging.md).
+`build` runs `apply` first, then CMake configuration and the `game-client` build. It does not install dependencies. If the original checkout lacks its submodule, `--libraries /path/to/ddnet-libs` copies a separate dependency checkout into staging only. Extra cache settings use `--cmake-arg=-DNAME=VALUE`; keep build output outside `.ddmix` and the original checkout. See the [staging and build guide](docs/staging.md).
 
 To locate a function without changing it:
 
@@ -90,6 +91,8 @@ Place new `.cpp` and `.h` files under `workspace/mods/my-mod/src/game/client/…
 
 HEAD inserts at the beginning of a function body. TAIL inserts at its lexical end, **not before every return**. Generic edits support INSERT, REPLACE and REMOVE with documented target restrictions. Ambiguous matches and overlapping edits fail instead of choosing a location.
 
+Components can declare their header, CGameClient member and `all`/`input` registration in `[[components]]`. BEFORE_CALL, AFTER_CALL, MODIFY_ARG, RETURN, OVERWRITE and explicit-block WRAP are available with conservative restrictions. Config edits are checked for identifier/console-name collisions. See the [advanced feature guide](docs/advanced-injections.md).
+
 Dependencies have deterministic ordering; compatibility and dependency version constraints currently accept only `*`. The parser covers a subset of C++ and explicitly reports unsupported regions. `check` validates selectors, conflicts and structural CMake placement—it does not run a compiler or validate snippet semantics.
 
 ## Documentation
@@ -98,7 +101,9 @@ Dependencies have deterministic ordering; compatibility and dependency version c
 - [Staging, ownership checks, CMake and build recovery](docs/staging.md)
 - [Real-DDNet validation and known gaps](docs/validation.md)
 - [Development roadmap](docs/roadmap.md)
-- [Complete example package](examples/basic-hooks)
+- [Advanced injections and components](docs/advanced-injections.md)
+- [Binary packaging and platform status](docs/distribution.md)
+- [Basic hooks](examples/basic-hooks), [advanced hooks](examples/advanced-hooks) and [component](examples/component) examples
 
 ## Development
 

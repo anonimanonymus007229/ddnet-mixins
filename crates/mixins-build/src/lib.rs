@@ -1,4 +1,5 @@
 //! Read-only planning and isolated, tool-owned staging publication.
+mod components;
 use mixins_transform::{Edit, Plan};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -105,6 +106,11 @@ pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
     for m in &mods {
         let mut edits = m.manifest.edits.clone();
         edits.extend(m.manifest.injections.iter().map(|i| i.lower()));
+        for c in &m.manifest.components {
+            edits.extend(components::lower(&ddnet, m, c).map_err(|e| {
+                format!("mod {}, component {}: {e}", m.manifest.package.id, c.class)
+            })?);
+        }
         edits.sort_by(|a, b| (a.priority, &a.id).cmp(&(b.priority, &b.id)));
         for e in edits {
             grouped
@@ -144,7 +150,11 @@ pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
         let source = io(fs::read_to_string(safe_file(&ddnet, &file)?))?;
         let refs: Vec<_> = edits.iter().map(|(id, e)| (id.as_str(), e)).collect();
         let plan = Plan::resolve(&source, &refs)?;
-        result.rendered.insert(file.clone(), plan.render(&source)?);
+        let rendered = plan.render(&source)?;
+        if file == "src/engine/shared/config_variables.h" {
+            validate_config(&rendered)?;
+        }
+        result.rendered.insert(file.clone(), rendered);
         result
             .input_sha256
             .insert(file.clone(), hash(source.as_bytes()));
@@ -167,7 +177,100 @@ pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
     result
         .input_sha256
         .insert("CMakeLists.txt".into(), hash(cmake.as_bytes()));
+    // Validate all generated component member names across mod boundaries.
+    let mut members = std::collections::BTreeSet::new();
+    for m in &mods {
+        for c in &m.manifest.components {
+            if !members.insert(&c.member) {
+                return Err(format!("duplicate component member {}", c.member));
+            }
+        }
+    }
     Ok(result)
+}
+impl IntegrationPlan {
+    pub fn diff(&self, ddnet: &Path) -> Result<String> {
+        let mut output = String::new();
+        for (file, after) in &self.rendered {
+            let before = io(fs::read_to_string(ddnet.join(file)))?;
+            output.push_str(
+                &similar::TextDiff::from_lines(&before, after)
+                    .unified_diff()
+                    .context_radius(3)
+                    .header(&format!("a/{file}"), &format!("b/{file}"))
+                    .to_string(),
+            );
+        }
+        output.push_str(
+            &similar::TextDiff::from_lines("", &self.generated_cmake)
+                .unified_diff()
+                .header("/dev/null", "b/.ddmix/generated.cmake")
+                .to_string(),
+        );
+        Ok(output)
+    }
+}
+fn validate_config(source: &str) -> Result<()> {
+    let l = mixins_lexer::lex(source);
+    let syntax = mixins_parser::syntax::Syntax::new(source, &l)?;
+    // Distinct arms of the same #if cannot coexist. Do not evaluate macros.
+    let mut branches = vec![Vec::<(usize, usize)>::new(); l.tokens.len()];
+    let mut stack: Vec<(usize, usize)> = vec![];
+    for (i, t) in l.tokens.iter().enumerate() {
+        branches[i] = stack.clone();
+        if t.kind == mixins_lexer::Kind::Directive {
+            let directive = source[t.start + 1..t.end]
+                .trim_start()
+                .split(|c: char| !c.is_ascii_alphabetic())
+                .next()
+                .unwrap_or("");
+            match directive {
+                "if" | "ifdef" | "ifndef" => stack.push((i, 0)),
+                "else" | "elif" => {
+                    if let Some((_, arm)) = stack.last_mut() {
+                        *arm += 1;
+                    }
+                }
+                "endif" => {
+                    stack.pop();
+                }
+                _ => {}
+            }
+        }
+    }
+    type ConfigDeclaration = (String, String, Vec<(usize, usize)>);
+    let mut seen: Vec<ConfigDeclaration> = vec![];
+    for name in ["MACRO_CONFIG_INT", "MACRO_CONFIG_COL", "MACRO_CONFIG_STR"] {
+        for invocation in syntax.invocations(name)? {
+            if invocation.arguments.len() < 2 {
+                return Err("config macro requires identifier and console name".into());
+            }
+            let arg = |n: usize| {
+                let s = invocation.arguments[n];
+                source[s.start..s.end].trim()
+            };
+            let token = l
+                .tokens
+                .iter()
+                .position(|t| t.start == invocation.span.start)
+                .ok_or("missing macro token")?;
+            let branch = &branches[token];
+            if seen.iter().any(|(id, name, previous)| {
+                (id == arg(0) || name == arg(1))
+                    && !previous
+                        .iter()
+                        .any(|(group, arm)| branch.iter().any(|(g, a)| g == group && a != arm))
+            }) {
+                return Err(format!(
+                    "duplicate config identifier/console name: {} / {}",
+                    arg(0),
+                    arg(1)
+                ));
+            }
+            seen.push((arg(0).into(), arg(1).into(), branch.clone()));
+        }
+    }
+    Ok(())
 }
 #[derive(Serialize, Deserialize)]
 struct State {
@@ -212,6 +315,19 @@ fn validate_owned(root: &Path) -> Result<()> {
 /// Fresh copy every time; never patch an already transformed input. Publication
 /// uses a locked sibling transaction and renames with rollback on rename failure.
 pub fn apply(workspace: &Path, ddnet: &Path, mods: &Path) -> Result<PathBuf> {
+    apply_with_dependencies(workspace, ddnet, mods, None)
+}
+pub fn apply_with_dependencies(
+    workspace: &Path,
+    ddnet: &Path,
+    mods: &Path,
+    libraries: Option<&Path>,
+) -> Result<PathBuf> {
+    let libraries = libraries.map(|p| io(p.canonicalize())).transpose()?;
+    let dependency_files = libraries
+        .as_ref()
+        .map(|p| regular_tree(p, true))
+        .transpose()?;
     let workspace = io(workspace.canonicalize())?;
     let ddnet = io(ddnet.canonicalize())?;
     let output = workspace.join(".ddmix");
@@ -283,6 +399,21 @@ pub fn apply(workspace: &Path, ddnet: &Path, mods: &Path) -> Result<PathBuf> {
             &dest,
             io(fs::metadata(ddnet.join(relative)))?.permissions(),
         ))?;
+    }
+    if let (Some(libs), Some(files)) = (&libraries, dependency_files) {
+        let destination = staged.join("ddnet-libs");
+        if destination.exists() && !regular_tree(&destination, false)?.is_empty() {
+            return Err(
+                "DDNet already contains bundled dependencies; refusing external override".into(),
+            );
+        }
+        for relative in files {
+            let path = destination.join(&relative);
+            io(fs::create_dir_all(
+                path.parent().ok_or("dependency parent missing")?,
+            ))?;
+            io(fs::copy(libs.join(relative), path))?;
+        }
     }
     for (relative, content) in &plan.rendered {
         io(fs::write(staged.join(relative), content))?;

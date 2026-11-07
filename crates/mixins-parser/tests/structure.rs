@@ -39,15 +39,15 @@ fn no_guessed_functions_from_macros_lambdas_or_initializers() {
     assert_eq!(index.unsupported.len(), 3);
 }
 #[test]
-fn unsupported_overload_does_not_disappear_from_selection() {
+fn template_overload_is_indexed_and_requires_disambiguation() {
     let source = "void f() {}\ntemplate<class T> void f(T x) {}";
     let index = parse(source, &lex(source));
-    assert_eq!(index.functions.len(), 1);
+    assert_eq!(index.functions.len(), 2);
     assert!(
         index
             .select_function("f", None, source)
             .unwrap_err()
-            .contains("unsupported")
+            .contains("2 matches")
     );
 }
 #[test]

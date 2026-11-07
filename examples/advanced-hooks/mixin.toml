@@ -1,0 +1,50 @@
+[mod]
+id = "advanced-hooks"
+name = "Behavior-preserving advanced injection examples"
+version = "0.1.0"
+
+[[injections]]
+id = "before-send"
+file = "src/game/client/gameclient.cpp"
+target = "CGameClient::SendSwitchTeam"
+kind = "BEFORE_CALL"
+callee = "Client()->SendPackMsgActive"
+content = "/* before send */ "
+
+[[injections]]
+id = "after-send"
+file = "src/game/client/gameclient.cpp"
+target = "CGameClient::SendSwitchTeam"
+kind = "AFTER_CALL"
+callee = "Client()->SendPackMsgActive"
+content = " /* after send */"
+
+[[injections]]
+id = "modify-send-flags"
+file = "src/game/client/gameclient.cpp"
+target = "CGameClient::SendSwitchTeam"
+kind = "MODIFY_ARG"
+callee = "Client()->SendPackMsgActive"
+argument = 1
+content = "(MSGFLAG_VITAL | 0)"
+
+[[injections]]
+id = "version-return"
+file = "src/game/client/gameclient.cpp"
+target = "CGameClient::DDNetVersion"
+kind = "RETURN"
+content = "(DDNET_VERSION_NUMBER + 0)"
+
+[[injections]]
+id = "overwrite-empty-method"
+file = "src/game/client/gameclient.cpp"
+target = "CGameClient::OnEnterGame"
+kind = "OVERWRITE"
+content = "\n\t// Deliberately empty callback.\n"
+
+[[injections]]
+id = "wrap-echo"
+file = "src/game/client/gameclient.cpp"
+target = "CGameClient::Echo"
+kind = "WRAP"
+content = "\n\t/* before */ {{original}} /* after */\n"

@@ -15,9 +15,10 @@
 | Tokens including trivia | 2,355,516 |
 | Files containing conditionals | 415 |
 | Lexical diagnostics | 0 |
-| Indexed function definitions | 7,300 |
-| Indexed classes | 1,100 |
-| Unsupported structural regions | 1,997 |
+| Indexed function definitions | 8,121 |
+| Indexed classes | 1,119 |
+| Declaration-only functions/methods | 6,632 |
+| Unsupported structural regions | 1,273 |
 | Structural diagnostics | 14 |
 
 Structural diagnostics are in bundled external headers (conditional `extern
@@ -34,7 +35,7 @@ without choosing any branch active.
 ## Executed locally (Windows, Rust 1.99.1)
 
 - `cargo test --workspace`: lexer, manifest, parser, transform and CLI tests.
-- `cargo test --workspace -- --ignored --nocapture`: six explicit real-DDNet
+- `cargo test --workspace -- --ignored --nocapture`: nine explicit real-DDNet
   integration tests passed (lexer scan, parser scan, real selector/body tests,
   HEAD/TAIL/config rendering, real CMake anchors, repeated real-DDNet staging).
 - Real `CGameClient::OnInit`, `OnRender` and `OnConsoleInit` resolved with exact
@@ -44,7 +45,8 @@ without choosing any branch active.
 - HEAD/TAIL rendering on the actual OnInit source preserves all original bytes
   when inserted snippets are removed.
 - Config insertion resolves the real reserved comment and preserves its
-  repeated-include/macro design. Duplicate identifiers are not checked yet.
+  repeated-include/macro design. Duplicate identifiers/console names are checked
+  after rendering; existing mutually exclusive declarations remain valid.
 - `ddmix plan --ddnet workspace/ddnet --mods examples`: three patches, across
   the real gameclient.cpp and config_variables.h, without modifying upstream.
 - CLI regression verifies identical plan/check output, path traversal rejection,
@@ -68,16 +70,34 @@ against the pinned DDNet checkout. These remote jobs have not been observed.
 
 ## Remaining gaps
 
-Real staged-DDNet configure was attempted with MSVC 19.51.36260.0 and Python
-3.12.10. Configure stops before full generation because Curl, SQLite3, libpng,
-Freetype, Ogg, Opus, Opusfile and SDL2 are missing. The original checkout's
-`ddnet-libs` directory is empty. No dependencies were installed automatically.
-The full client compile remains unverified; configure failure returns nonzero.
-Logs: `target/reports/ddnet-configure.log`.
+Initial configure failed because bundled dependencies were absent. A separate
+DDNet libraries checkout at `c0e6703fbcdbe03df2f26875427ec3951ce4ec21` was fetched
+under workspace/dependencies and copied only into staging via --libraries.
+MSVC 19.51.36260.0 / Python 3.12.10 successfully configured and built the real
+Windows Release game-client with the declared CDdmixExample component in all
+and input collections. Output: `workspace/component-build/Release/DDNet.exe`.
+Logs: `target/reports/full-client-build.log` and `all-features-build.log`.
+The second successful build includes every exposed injection kind, the config
+entry, both overlay compilation units and the registered component. Actual
+Visual Studio target and checksummed_files.txt include the mod files. Post-build
+SHA-256 ownership inventory matches state.json exactly. Client binary SHA-256:
+`39c21fbb539448f060214abad3a5cd06885efde342d500b5431e3f53718b3dac`.
+VIDEORECORDER, VULKAN, SERVER, TOOLS and DOWNLOAD_GTEST were disabled.
 
-Component registration, config collision analysis and a complete C++ AST are
-not implemented. Plan/check validate CMake structural integration, not configure
-or snippet semantics. Copy staging intentionally omits Git metadata. Source
-mutation during a build/apply and hostile filesystem races are unsupported.
+The build exposed Python __pycache__ writes into source. The wrapper now sets
+PYTHONDONTWRITEBYTECODE=1; generated cache files from the initial validation were
+removed selectively before repeating validation. Original DDNet remains clean.
+
+The regular suite has 27 passing tests; explicit corpus tests cover config
+collisions, real component lowering/diff and real advanced selectors in addition
+to earlier scans/staging. Release packaging workflow covers Windows x86_64,
+Linux x86_64, macOS Intel/ARM64 but has not been run remotely. A local Windows
+archive is generated under target/dist. No public tag/release is published.
+
+Remaining: no complete C++ semantic AST, macro expansion, arbitrary nested call
+rewrites or complex return control-flow transformation. Advanced aliases have
+explicit conservative semantics documented in advanced-injections.md. The client
+was compiled, not interactively exercised in a game session. Copy staging omits
+Git metadata; concurrent mutation/hostile filesystem races remain unsupported.
 Linux/macOS binaries and Rust 1.85 minimum-version compatibility have not been
 tested locally. See [staging workflow](staging.md).

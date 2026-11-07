@@ -18,10 +18,33 @@ pub enum Position {
     After,
     BodyStart,
     BodyEnd,
+    Start,
+    End,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Target {
+    File,
+    Tokens {
+        words: Vec<String>,
+        within: Option<String>,
+        #[serde(default)]
+        block: bool,
+    },
+    Body {
+        name: String,
+        parameters: Option<String>,
+    },
+    ReturnExpression {
+        function: String,
+        parameters: Option<String>,
+    },
+    Call {
+        function: String,
+        parameters: Option<String>,
+        callee: String,
+        argument: Option<usize>,
+    },
     Function {
         name: String,
         parameters: Option<String>,
@@ -50,6 +73,12 @@ pub struct Edit {
 pub enum InjectionKind {
     Head,
     Tail,
+    BeforeCall,
+    AfterCall,
+    ModifyArg,
+    Return,
+    Overwrite,
+    Wrap,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -62,21 +91,57 @@ pub struct Injection {
     pub content: String,
     #[serde(default)]
     pub priority: i32,
+    pub callee: Option<String>,
+    pub argument: Option<usize>,
 }
 impl Injection {
     pub fn lower(&self) -> Edit {
+        let body = Target::Body {
+            name: self.target.clone(),
+            parameters: self.parameters.clone(),
+        };
+        let call = Target::Call {
+            function: self.target.clone(),
+            parameters: self.parameters.clone(),
+            callee: self.callee.clone().unwrap_or_default(),
+            argument: self.argument,
+        };
+        let (action, target, position) = match self.kind {
+            InjectionKind::Head => (
+                Action::Insert,
+                Target::Function {
+                    name: self.target.clone(),
+                    parameters: self.parameters.clone(),
+                },
+                Some(Position::BodyStart),
+            ),
+            InjectionKind::Tail => (
+                Action::Insert,
+                Target::Function {
+                    name: self.target.clone(),
+                    parameters: self.parameters.clone(),
+                },
+                Some(Position::BodyEnd),
+            ),
+            InjectionKind::BeforeCall => (Action::Insert, call, Some(Position::Before)),
+            InjectionKind::AfterCall => (Action::Insert, call, Some(Position::After)),
+            InjectionKind::ModifyArg => (Action::Replace, call, None),
+            InjectionKind::Return => (
+                Action::Replace,
+                Target::ReturnExpression {
+                    function: self.target.clone(),
+                    parameters: self.parameters.clone(),
+                },
+                None,
+            ),
+            InjectionKind::Overwrite | InjectionKind::Wrap => (Action::Replace, body, None),
+        };
         Edit {
             id: self.id.clone(),
             file: self.file.clone(),
-            action: Action::Insert,
-            target: Target::Function {
-                name: self.target.clone(),
-                parameters: self.parameters.clone(),
-            },
-            position: Some(match self.kind {
-                InjectionKind::Head => Position::BodyStart,
-                InjectionKind::Tail => Position::BodyEnd,
-            }),
+            action,
+            target,
+            position,
             content: Some(self.content.clone()),
             priority: self.priority,
         }
@@ -103,7 +168,69 @@ impl Plan {
         let mut patches = Vec::new();
         for &(mod_id, edit) in edits {
             let resolve = || -> Result<Patch, String> {
+                let syntax = || mixins_parser::syntax::Syntax::new(source, &lexed);
                 let (span, body) = match &edit.target {
+                    Target::File => (
+                        Span {
+                            start: 0,
+                            end: source.len(),
+                        },
+                        None,
+                    ),
+                    Target::Tokens {
+                        words,
+                        within,
+                        block,
+                    } => {
+                        let within = if let Some(name) = within {
+                            index.select_function(name, None, source)?.body
+                        } else {
+                            Span {
+                                start: 0,
+                                end: source.len(),
+                            }
+                        };
+                        let selected = syntax()?.sequence(words, within, *block)?;
+                        (selected, if *block { Some(selected) } else { None })
+                    }
+                    Target::Body { name, parameters } => {
+                        let b = index
+                            .select_function(name, parameters.as_deref(), source)?
+                            .body;
+                        (
+                            Span {
+                                start: b.start + 1,
+                                end: b.end - 1,
+                            },
+                            Some(b),
+                        )
+                    }
+                    Target::ReturnExpression {
+                        function,
+                        parameters,
+                    } => {
+                        let b = index
+                            .select_function(function, parameters.as_deref(), source)?
+                            .body;
+                        (syntax()?.return_expression(b)?, None)
+                    }
+                    Target::Call {
+                        function,
+                        parameters,
+                        callee,
+                        argument,
+                    } => {
+                        let b = index
+                            .select_function(function, parameters.as_deref(), source)?
+                            .body;
+                        let (call, args) = syntax()?.call(b, callee)?;
+                        let selected = if let Some(n) = argument {
+                            *args.get(*n).ok_or("call argument index out of range")?
+                        } else {
+                            call
+                        };
+                        (selected, None)
+                    }
                     Target::Function { name, parameters } => {
                         let f = index.select_function(name, parameters.as_deref(), source)?;
                         (f.declaration, Some(f.body))
@@ -147,7 +274,7 @@ impl Plan {
                         }
                     }
                 };
-                let content = match edit.action {
+                let mut content = match edit.action {
                     Action::Remove => {
                         if edit.content.is_some() {
                             return Err("REMOVE must not specify content".into());
@@ -159,6 +286,35 @@ impl Plan {
                         .clone()
                         .ok_or("INSERT/REPLACE requires content")?,
                 };
+                if content.contains("{{original}}") {
+                    if !matches!(edit.target, Target::Body { .. })
+                        || !matches!(edit.action, Action::Replace)
+                        || content.matches("{{original}}").count() != 1
+                    {
+                        return Err(
+                            "{{original}} requires exactly one placeholder in a body replacement"
+                                .into(),
+                        );
+                    }
+                    // An explicit nested original block, not a renamed function:
+                    // allow only bodies without return/goto so post-code executes.
+                    let fragment = lex(&source[span.start..span.end]);
+                    if fragment.tokens.iter().any(|t| {
+                        t.kind == Kind::Identifier
+                            && matches!(
+                                &source[span.start + t.start..span.start + t.end],
+                                "return" | "goto" | "co_return"
+                            )
+                    }) {
+                        return Err(
+                            "WRAP original block cannot contain return/goto/co_return".into()
+                        );
+                    }
+                    content = content.replace(
+                        "{{original}}",
+                        &format!("{{{}}}", &source[span.start..span.end]),
+                    );
+                }
                 let span = match edit.action {
                     Action::Insert => {
                         if matches!(edit.target, Target::Class { .. })
@@ -168,6 +324,13 @@ impl Plan {
                         }
                         let offset =
                             match edit.position.as_ref().ok_or("INSERT requires position")? {
+                                Position::Start if matches!(edit.target, Target::File) => 0,
+                                Position::End if matches!(edit.target, Target::File) => {
+                                    source.len()
+                                }
+                                Position::Start | Position::End => {
+                                    return Err("START/END currently require file target".into());
+                                }
                                 Position::Before => span.start,
                                 Position::After => span.end,
                                 Position::BodyStart => body.ok_or("target has no body")?.start + 1,
@@ -211,9 +374,9 @@ impl Plan {
                 let conflict = if ai && bi {
                     false
                 } else if ai {
-                    b.span.start <= a.span.start && a.span.start <= b.span.end
+                    b.span.start < a.span.start && a.span.start < b.span.end
                 } else if bi {
-                    a.span.start <= b.span.start && b.span.start <= a.span.end
+                    a.span.start < b.span.start && b.span.start < a.span.end
                 } else {
                     a.span.start < b.span.end && b.span.start < a.span.end
                 };
@@ -225,7 +388,9 @@ impl Plan {
                 }
             }
         }
-        patches.sort_by_key(|p| p.span.start); // stable: preserve input order for equal offsets
+        // Boundary inserts precede a replacement starting at the same offset;
+        // inserts at its end follow it. Stable within equal insert positions.
+        patches.sort_by_key(|p| (p.span.start, usize::from(p.span.start != p.span.end)));
         Ok(Self { patches })
     }
     /// No formatting or newline normalization: snippets are inserted verbatim.

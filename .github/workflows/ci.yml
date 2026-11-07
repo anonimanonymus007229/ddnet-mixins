@@ -26,3 +26,23 @@ jobs:
           path: workspace/ddnet
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace --locked -- --ignored --nocapture
+  ddnet-windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ddnet/ddnet
+          ref: 176fc2f9ab85ace703c6ec10da0249b01995ba94
+          path: workspace/ddnet
+      - uses: actions/checkout@v4
+        with:
+          repository: ddnet/ddnet-libs
+          ref: c0e6703fbcdbe03df2f26875427ec3951ce4ec21
+          path: workspace/dependencies/ddnet-libs
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo run --release --locked -- build --workspace workspace --ddnet workspace/ddnet --mods examples --libraries workspace/dependencies/ddnet-libs --build-dir workspace/build-ddmix --cmake-arg=-DVIDEORECORDER=OFF --cmake-arg=-DVULKAN=OFF --cmake-arg=-DSERVER=OFF --cmake-arg=-DTOOLS=OFF --cmake-arg=-DDOWNLOAD_GTEST=OFF --cmake-arg=-DPREFER_BUNDLED_LIBS=ON
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ddnet-example-client-windows
+          path: workspace/build-ddmix/Release/DDNet.exe

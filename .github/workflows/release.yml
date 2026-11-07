@@ -1,0 +1,45 @@
+name: Release binaries
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: ddmix
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: ddmix.exe
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: ddmix
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: ddmix
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package executable, license and checksum
+        shell: bash
+        run: |
+          python scripts/package.py --binary target/${{ matrix.target }}/release/${{ matrix.binary }} --target ${{ matrix.target }} --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ddmix-${{ matrix.target }}
+          path: dist/*
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/*
+          generate_release_notes: true

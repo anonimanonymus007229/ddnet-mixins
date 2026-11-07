@@ -18,6 +18,18 @@ pub struct Manifest {
     pub edits: Vec<mixins_transform::Edit>,
     #[serde(default)]
     pub injections: Vec<mixins_transform::Injection>,
+    #[serde(default)]
+    pub components: Vec<Component>,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Component {
+    pub class: String,
+    pub header: String,
+    pub member: String,
+    pub register_in: Vec<String>,
+    #[serde(default)]
+    pub priority: i32,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -99,6 +111,47 @@ pub fn load(path: &Path) -> Result<Manifest, String> {
             return Err(format!(
                 "{}: edit path must be a normalized src/... path: {file}",
                 path.display()
+            ));
+        }
+    }
+    for i in &m.injections {
+        use mixins_transform::InjectionKind as K;
+        let call = matches!(i.kind, K::BeforeCall | K::AfterCall | K::ModifyArg);
+        if call != i.callee.is_some()
+            || matches!(i.kind, K::ModifyArg) != i.argument.is_some()
+            || (matches!(i.kind, K::Wrap) && i.content.matches("{{original}}").count() != 1)
+        {
+            return Err(format!(
+                "{}: injection {} has invalid callee/argument/original placeholder fields",
+                path.display(),
+                i.id
+            ));
+        }
+    }
+    for c in &m.components {
+        let ident = |s: &str| {
+            !s.is_empty()
+                && s.bytes().enumerate().all(|(n, b)| {
+                    b.is_ascii_alphabetic() || b == b'_' || (n > 0 && b.is_ascii_digit())
+                })
+        };
+        if !ident(&c.class)
+            || !ident(&c.member)
+            || !c.header.starts_with("game/client/")
+            || c.header.contains('\\')
+            || c.header
+                .split('/')
+                .any(|p| p.is_empty() || p == ".." || p == "." || p.contains(':'))
+            || !c.header.ends_with(".h")
+            || c.register_in.is_empty()
+            || !c.register_in.iter().any(|s| s == "all")
+            || c.register_in.iter().any(|s| s != "all" && s != "input")
+            || c.register_in.iter().collect::<BTreeSet<_>>().len() != c.register_in.len()
+        {
+            return Err(format!(
+                "{}: invalid component declaration {} (requires all; optional input)",
+                path.display(),
+                c.class
             ));
         }
     }

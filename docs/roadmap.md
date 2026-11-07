@@ -1,45 +1,44 @@
-# Engineering roadmap
+# Implementation status and remaining work
 
-The supplied project specification (`LLM.md`, November 2026 development session)
-is the design baseline. Discovery/lexing and an initial conservative structural
-index/edit planner, isolated staging and CMake overlay integration are
-implemented; this is not the specification's first useful release.
+The supplied project specification is the baseline. The supported real-DDNet
+workflow is implemented and Windows compilation verified; this is still an early
+release with conservative C++ grammar and explicit compatibility limits.
 
-## Next: structural parsing
+## Implemented
 
-1. Token cursor with lookahead, marks and rewind.
-2. Explicit preprocessor-region model and branch-local delimiter maps. Handle
-   shared delimiters outside conditionals without guessing active branches.
-3. Namespace/class/declaration/function index on real DDNet. Distinguish
-   constructors, declarations, lambdas, braced initializers and macro syntax.
-4. Fully qualified and signature selectors; reject missing/ambiguous/unsupported
-   targets with source-located diagnostics. Index comments and macro arguments.
+- Strict manifests, source-overlay discovery, dependency order/cycle checking.
+- Own byte-span lexer, directives, branch-aware delimiter matching.
+- Namespace/class/function definitions, declaration-only methods, template heads
+  and return types, common operators/noexcept/trailing returns, initial ctor
+  support. Lexical macro invocations with nested argument spans.
+- Qualified selectors and overload disambiguation; unsupported-region checks.
+- Generic INSERT/REPLACE/REMOVE plans, deterministic ordering, conflicts, diff.
+- HEAD/TAIL, bounded standalone BEFORE_CALL/AFTER_CALL/MODIFY_ARG, final RETURN,
+  body OVERWRITE and explicit-original-block WRAP.
+- Config identifier/console-name conflict checks, exclusive branch awareness.
+- Staged fresh copy, ownership inventory, repeated apply, external source CMake
+  mapping, checksum integration/capacity checks, build command.
+- Component include/member/all/input registration lowering to generic edits.
+- Real Windows Release client compile with all example mods and pinned libs.
+- Local Windows executable/ZIP/checksum; multi-platform release workflow.
 
-## Then: universal transformations
+## Not universal or release-validated yet
 
-- Resolve all targets against immutable original spans.
-- Only INSERT / REPLACE / REMOVE primitives; HEAD/TAIL lower to body insertions.
-- Stable dependency/priority/ID ordering, explicit same-offset ordering,
-  overlap detection, JSON plans and diffs. No writes during plan/check.
-- Preserve newline style and untouched bytes.
+- Full C++ AST/type checking/macro expansion is not implemented; function pointer
+  declarators, arbitrary template expressions, anonymous namespaces and braced
+  ctor initializers still need grammar work. Corpus has unsupported regions.
+- Nested/conditional expression calls and general multi-return interception are
+  rejected. WRAP is an explicit nested block, not arbitrary original-function
+  forwarding. CANCEL has no defined semantics and is not exposed.
+- Components support the inspected DDNet layout, simple names and direct public
+  CComponent inheritance. Other versions/layouts need corpus/build validation.
+- Versions accept wildcard only; non-client target mappings are unavailable.
+- Copy staging loses original Git metadata; crash recovery is manual. Concurrent
+  source mutation/build/apply and hostile filesystem races are unsupported.
+- Full client runtime/game-session behavior was not manually exercised.
+- Linux/macOS binaries and CI/release upload are not observed yet; no public
+  tag/release, installer, signing, notarization or updater has been produced.
+- Minimum Rust version declaration has not been exercised separately locally.
 
-## Staging and integration
-
-- Tool-owned `.ddmix/staging/ddnet` copy/worktree; never transform upstream.
-- Canonicalized path containment, no symlink writes, atomic state publication,
-  ownership checks, repeatable regeneration from pristine inputs.
-- Parse actual CMake command/block structure to locate a common point after
-  platform-specific game-client creation. Never append at a guessed line.
-- External mod sources via generated target_sources/target_include_directories;
-  explicit DDMIX_WORKSPACE_ROOT. Inspect source checksum metadata before choosing
-  its integration mechanism.
-- Component declarations lower to generic include/member/registration edits
-  discovered from actual CGameClient structures and lifecycle.
-- Config insertions use the parsed reserved comment; detect duplicate IDs.
-- Configure and build the staged client, including a real declared component.
-
-init/list/inspect/locate/plan/check/apply/build are exposed today. Staging and
-CMake target-property tests pass; full local DDNet build is blocked by missing
-third-party dependencies. Component registration is the next major feature.
-Advanced aliases, semver constraints, non-client target mapping, distribution
-artifacts and comprehensive platform testing remain future work.
+See validation.md for actual executed tests/builds, advanced-injections.md for
+precise alias semantics, and distribution.md for publishing instructions.
