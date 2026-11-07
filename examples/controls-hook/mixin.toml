@@ -1,0 +1,11 @@
+[mod]
+id = "controls-hook"
+name = "SnapInput hook from an external snippet"
+version = "0.1.0"
+
+[[injections]]
+id = "snapinput-head"
+file = "src/game/client/components/controls.cpp"
+target = "CControls::SnapInput"
+kind = "HEAD"
+content_file = "hooks/ccontrols_snapinput.cpp"

@@ -35,7 +35,7 @@ without choosing any branch active.
 ## Executed locally (Windows, Rust 1.99.1)
 
 - `cargo test --workspace`: lexer, manifest, parser, transform and CLI tests.
-- `cargo test --workspace -- --ignored --nocapture`: nine explicit real-DDNet
+- `cargo test --workspace -- --ignored --nocapture`: ten explicit real-DDNet
   integration tests passed (lexer scan, parser scan, real selector/body tests,
   HEAD/TAIL/config rendering, real CMake anchors, repeated real-DDNet staging).
 - Real `CGameClient::OnInit`, `OnRender` and `OnConsoleInit` resolved with exact
@@ -88,7 +88,15 @@ The build exposed Python __pycache__ writes into source. The wrapper now sets
 PYTHONDONTWRITEBYTECODE=1; generated cache files from the initial validation were
 removed selectively before repeating validation. Original DDNet remains clean.
 
-The regular suite has 27 passing tests; explicit corpus tests cover config
+File-based injection validation also compiles `content_file =
+"hooks/ccontrols_snapinput.cpp"` into real CControls::SnapInput. Full Release
+build passed again; log: `target/reports/content-file-client-build.log`.
+The hook fragment is absent from target_sources and appears only inside the
+transformed controls.cpp. File/inline plans lower identically, content is read
+fresh, UTF-8/CRLF are preserved, ambiguous source fields and unsafe paths fail.
+Unix symlink tests are CI-only locally.
+
+The regular suite has 31 passing tests; explicit corpus tests cover config
 collisions, real component lowering/diff and real advanced selectors in addition
 to earlier scans/staging. Release packaging workflow covers Windows x86_64,
 Linux x86_64, macOS Intel/ARM64 but has not been run remotely. A local Windows

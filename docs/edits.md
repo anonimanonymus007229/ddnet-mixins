@@ -37,12 +37,47 @@ INSERT/REPLACE requires `content`; REMOVE must omit it. REPLACE/REMOVE must
 omit position. Every edit has a unique lowercase/hyphenated `id`, a normalized
 `src/...` file path, and optional integer `priority` (default 0).
 
-`[[injections]]` requires `id`, `file`, fully qualified `target`, `content`,
-and HEAD or TAIL `kind`; `parameters` and `priority` are optional. HEAD lowers
+`[[injections]]` requires `id`, `file`, fully qualified `target`, a `kind`, and
+exactly one of inline `content` or `content_file = "hooks/filename.cpp"`.
+`parameters` and `priority` are optional. HEAD lowers
 to INSERT/BODY_START and TAIL to INSERT/BODY_END. **TAIL is the lexical body
 end, not execution before every return.** No return interception is implied.
 See [advanced aliases](advanced-injections.md) for the separate RETURN, call,
 body overwrite and explicit-block wrap operations.
+
+## Injection content from files
+
+```toml
+[[injections]]
+id = "snapinput-head"
+file = "src/game/client/components/controls.cpp"
+target = "CControls::SnapInput"
+kind = "HEAD"
+content_file = "hooks/ccontrols_snapinput.cpp"
+```
+
+Paths are relative to the directory containing `mixin.toml`, not the shell's
+working directory or the DDNet root. Files must be regular UTF-8 files beneath
+that mod's `hooks/` directory. Use forward slashes; absolute paths, `..`, `.`,
+empty path components and symlink components are rejected. Nested folders and
+spaces are supported. Missing/unreadable/non-UTF-8 files produce an error naming
+the manifest, mod, injection and snippet path.
+
+The file is a **code fragment**, not a complete function or compilation unit.
+It is read on each manifest load and inserted verbatim, including its original
+newlines/indentation, into the selected context. No extra newline is added: a
+HEAD snippet should start/end with appropriate whitespace so it does not merge
+with surrounding statements. `this`, target parameters and members can be used
+where C++ normally permits them; locals declared later in the original body
+are not available at HEAD. Avoid file-level includes/function definitions in a
+body snippet. `hooks/` is not scanned as an overlay or added to target_sources.
+
+This works for every injection kind, including WRAP (`{{original}}` is checked
+after reading the file). Empty snippets are permitted, like explicit empty
+inline content. Generic `[[edits]]` still uses inline `content`; `content_file`
+is currently an injection field only. There is no `helper`/`bindings` adapter or
+automatically generated helper function: this feature performs textual insertion
+at validated syntax spans. See `examples/controls-hook` for a real DDNet example.
 
 ## Ordering, conflicts and preservation
 

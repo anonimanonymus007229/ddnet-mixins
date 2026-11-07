@@ -81,18 +81,80 @@ pub enum InjectionKind {
     Wrap,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "InjectionInput", into = "InjectionInput")]
 pub struct Injection {
     pub id: String,
     pub file: String,
     pub target: String,
     pub parameters: Option<String>,
     pub kind: InjectionKind,
+    /// Resolved snippet text. Manifest loading reads content_file before lowering.
     pub content: String,
+    pub content_file: Option<String>,
     #[serde(default)]
     pub priority: i32,
     pub callee: Option<String>,
     pub argument: Option<usize>,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InjectionInput {
+    id: String,
+    file: String,
+    target: String,
+    parameters: Option<String>,
+    kind: InjectionKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_file: Option<String>,
+    #[serde(default)]
+    priority: i32,
+    callee: Option<String>,
+    argument: Option<usize>,
+}
+impl From<Injection> for InjectionInput {
+    fn from(i: Injection) -> Self {
+        Self {
+            id: i.id,
+            file: i.file,
+            target: i.target,
+            parameters: i.parameters,
+            kind: i.kind,
+            content: if i.content_file.is_none() {
+                Some(i.content)
+            } else {
+                None
+            },
+            content_file: i.content_file,
+            priority: i.priority,
+            callee: i.callee,
+            argument: i.argument,
+        }
+    }
+}
+impl TryFrom<InjectionInput> for Injection {
+    type Error = String;
+    fn try_from(input: InjectionInput) -> Result<Self, Self::Error> {
+        if input.content.is_some() == input.content_file.is_some() {
+            return Err(format!(
+                "injection {}: specify exactly one of content or content_file",
+                input.id
+            ));
+        }
+        Ok(Self {
+            id: input.id,
+            file: input.file,
+            target: input.target,
+            parameters: input.parameters,
+            kind: input.kind,
+            content: input.content.unwrap_or_default(),
+            content_file: input.content_file,
+            priority: input.priority,
+            callee: input.callee,
+            argument: input.argument,
+        })
+    }
 }
 impl Injection {
     pub fn lower(&self) -> Edit {

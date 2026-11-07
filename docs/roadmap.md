@@ -13,6 +13,8 @@ release with conservative C++ grammar and explicit compatibility limits.
   support. Lexical macro invocations with nested argument spans.
 - Qualified selectors and overload disambiguation; unsupported-region checks.
 - Generic INSERT/REPLACE/REMOVE plans, deterministic ordering, conflicts, diff.
+- Injection content inline or from UTF-8 mod-relative hooks/ files, with strict
+  containment checks and no separate snippet compilation.
 - HEAD/TAIL, bounded standalone BEFORE_CALL/AFTER_CALL/MODIFY_ARG, final RETURN,
   body OVERWRITE and explicit-original-block WRAP.
 - Config identifier/console-name conflict checks, exclusive branch awareness.

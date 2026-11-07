@@ -45,6 +45,21 @@ fn plan_and_check_are_stable_read_only_and_reject_path_escape() {
         source
     );
     assert!(!root.join(".ddmix").exists());
+    fs::create_dir(root.join("mods/test/hooks")).unwrap();
+    fs::write(root.join("mods/test/hooks/f.cpp"), "example").unwrap();
+    let external = manifest.replace("content='example'", "content_file='hooks/f.cpp'");
+    fs::write(root.join("mods/test/mixin.toml"), &external).unwrap();
+    let external_plan = run("plan");
+    assert!(external_plan.status.success(), "{:?}", external_plan);
+    assert_eq!(
+        external_plan.stdout, plan.stdout,
+        "file and inline content must lower identically"
+    );
+    fs::remove_file(root.join("mods/test/hooks/f.cpp")).unwrap();
+    let missing = run("check");
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("content_file"));
+    assert!(!root.join(".ddmix").exists());
     fs::write(
         root.join("mods/test/mixin.toml"),
         manifest.replace("src/test.cpp", "src/../../outside.cpp"),

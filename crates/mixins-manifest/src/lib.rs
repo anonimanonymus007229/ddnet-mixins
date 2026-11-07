@@ -71,7 +71,7 @@ pub fn valid_id(id: &str) -> bool {
 }
 pub fn load(path: &Path) -> Result<Manifest, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let m: Manifest = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut m: Manifest = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     if !valid_id(&m.package.id)
         || m.package.name.trim().is_empty()
         || m.package.version.trim().is_empty()
@@ -114,7 +114,17 @@ pub fn load(path: &Path) -> Result<Manifest, String> {
             ));
         }
     }
-    for i in &m.injections {
+    for i in &mut m.injections {
+        if let Some(relative) = &i.content_file {
+            i.content = read_hook(path, relative).map_err(|e| {
+                format!(
+                    "{}: mod {}, injection {}, content_file {relative:?}: {e}",
+                    path.display(),
+                    m.package.id,
+                    i.id
+                )
+            })?;
+        }
         use mixins_transform::InjectionKind as K;
         let call = matches!(i.kind, K::BeforeCall | K::AfterCall | K::ModifyArg);
         if call != i.callee.is_some()
@@ -156,6 +166,43 @@ pub fn load(path: &Path) -> Result<Manifest, String> {
         }
     }
     Ok(m)
+}
+
+/// Snippets live outside the auto-compiled source overlay. Reject lexical path
+/// escapes and every symlink component, then verify canonical containment.
+fn read_hook(manifest: &Path, relative: &str) -> Result<String, String> {
+    if !relative.starts_with("hooks/")
+        || relative.contains('\\')
+        || relative.chars().any(char::is_control)
+        || relative
+            .split('/')
+            .any(|s| s.is_empty() || s == "." || s == ".." || s.contains(':'))
+    {
+        return Err(
+            "expected a normalized mod-relative hooks/... path using forward slashes".into(),
+        );
+    }
+    let root = manifest
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let mut file = root.clone();
+    for part in relative.split('/') {
+        file.push(part);
+        let meta = fs::symlink_metadata(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        if meta.file_type().is_symlink() {
+            return Err(format!("symlink hook path forbidden: {}", file.display()));
+        }
+    }
+    let canonical = file.canonicalize().map_err(|e| e.to_string())?;
+    if !canonical.starts_with(&root) {
+        return Err("hook path escapes the mod directory".into());
+    }
+    if !canonical.is_file() {
+        return Err("hook path must name a regular UTF-8 file, not a directory".into());
+    }
+    fs::read_to_string(&canonical).map_err(|e| format!("{}: {e}", canonical.display()))
 }
 
 pub fn discover(root: &Path) -> Result<Vec<Mod>, String> {

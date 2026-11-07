@@ -85,6 +85,12 @@ content = '''
 '''
 ```
 
+Prefer editing C++ outside TOML? Replace `content` with
+`content_file = "hooks/ccontrols_snapinput.cpp"` and put the snippet in your
+mod's `hooks/` directory. It is inserted into the target body, not compiled as a
+separate file. Use exactly one of `content` or `content_file`. See the
+[file-based hook example](examples/controls-hook) and [path rules](docs/edits.md#injection-content-from-files).
+
 Plan your packages with `ddmix plan --ddnet workspace/ddnet --mods workspace/mods`.
 
 Place new `.cpp` and `.h` files under `workspace/mods/my-mod/src/game/client/…`, mirroring DDNet paths. They are discovered automatically and attached to `game-client` without copying them into DDNet's source tree. Other target mappings are not supported yet; overlays cannot replace existing upstream files.
@@ -103,7 +109,7 @@ Dependencies have deterministic ordering; compatibility and dependency version c
 - [Development roadmap](docs/roadmap.md)
 - [Advanced injections and components](docs/advanced-injections.md)
 - [Binary packaging and platform status](docs/distribution.md)
-- [Basic hooks](examples/basic-hooks), [advanced hooks](examples/advanced-hooks) and [component](examples/component) examples
+- [Basic hooks](examples/basic-hooks), [file-based hook](examples/controls-hook), [advanced hooks](examples/advanced-hooks) and [component](examples/component) examples
 
 ## Development
 
