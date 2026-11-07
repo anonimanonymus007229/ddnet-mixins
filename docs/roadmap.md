@@ -2,8 +2,8 @@
 
 The supplied project specification (`LLM.md`, November 2026 development session)
 is the design baseline. Discovery/lexing and an initial conservative structural
-index/read-only edit planner are implemented; this is not the specification's
-first useful release.
+index/edit planner, isolated staging and CMake overlay integration are
+implemented; this is not the specification's first useful release.
 
 ## Next: structural parsing
 
@@ -38,8 +38,8 @@ first useful release.
 - Config insertions use the parsed reserved comment; detect duplicate IDs.
 - Configure and build the staged client, including a real declared component.
 
-init/list/inspect/locate and source-only plan/check are exposed today.
-apply/build remain unavailable until staging and CMake integration contracts
-are implemented and tested.
+init/list/inspect/locate/plan/check/apply/build are exposed today. Staging and
+CMake target-property tests pass; full local DDNet build is blocked by missing
+third-party dependencies. Component registration is the next major feature.
 Advanced aliases, semver constraints, non-client target mapping, distribution
 artifacts and comprehensive platform testing remain future work.

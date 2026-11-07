@@ -1,4 +1,4 @@
-# Read-only source edit planning (schema 0.1)
+# Source edit planning (schema 0.1)
 
 ```sh
 ddmix locate --file workspace/ddnet/src/game/client/gameclient.cpp --function CGameClient::OnInit
@@ -7,10 +7,11 @@ ddmix check --ddnet workspace/ddnet --mods examples
 ```
 
 Both `plan` and `check` resolve all enabled mods' source edits against original
-sources, detect conflicts, and emit the same JSON patch plan. Neither writes
-DDNet, staging, or generated state. `check` currently validates **source edits
-only**, not CMake, compiler semantics or duplicate config identifiers. Output
-explicitly marks CMake validation false. There is no apply/build command yet.
+sources, detect conflicts, validate structural CMake placement/overlay mapping,
+and emit the same JSON plan. Neither writes DDNet, staging, or generated state.
+They do not execute CMake or a compiler or check duplicate config identifiers.
+`apply` uses the plan in an isolated copy; `build` runs CMake against it. See
+[staging](staging.md).
 
 `examples/basic-hooks/mixin.toml` is a complete tested real-DDNet example.
 
@@ -67,4 +68,4 @@ such files fails. Unsupported regions containing a queried function's bare
 identifier also block selection: they might hide another overload. This is
 intentionally conservative and can reject an otherwise valid target. This is
 not complete semantic C++ lookup, macro expansion or a claim of universal
-selector safety. The current engine is deliberately read-only at the CLI.
+selector safety. Staged application never writes to the original input.

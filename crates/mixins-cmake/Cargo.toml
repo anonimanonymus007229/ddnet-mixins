@@ -1,0 +1,11 @@
+[package]
+name = "mixins-cmake"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mixins-lexer.workspace = true
+mixins-transform.workspace = true
+mixins-parser.workspace = true

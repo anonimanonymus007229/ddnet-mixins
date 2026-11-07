@@ -12,7 +12,15 @@ fn plan_and_check_are_stable_read_only_and_reject_path_escape() {
     let _cleanup = Cleanup(root.clone());
     fs::create_dir_all(root.join("ddnet/src")).unwrap();
     fs::create_dir_all(root.join("mods/test")).unwrap();
-    fs::write(root.join("ddnet/CMakeLists.txt"), "# read-only fixture").unwrap();
+    fs::write(root.join("ddnet/CMakeLists.txt"), "add_library(game-client INTERFACE)\nconfigure_file(cmake/checksummed_extra.txt checksummed_extra.txt)\n").unwrap();
+    fs::create_dir_all(root.join("ddnet/src/engine/client")).unwrap();
+    fs::create_dir(root.join("ddnet/cmake")).unwrap();
+    fs::write(
+        root.join("ddnet/src/engine/client/checksum.h"),
+        "unsigned m_aFiles[1024];",
+    )
+    .unwrap();
+    fs::write(root.join("ddnet/cmake/checksummed_extra.txt"), "extra\n").unwrap();
     let source = "void f() {\r\n}\r\n";
     fs::write(root.join("ddnet/src/test.cpp"), source).unwrap();
     let manifest = "[mod]\nid='test'\nname='Test'\nversion='1'\n[[injections]]\nid='head'\nfile='src/test.cpp'\ntarget='f'\nkind='HEAD'\ncontent='example'\n";

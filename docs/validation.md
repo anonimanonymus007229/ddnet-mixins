@@ -34,9 +34,9 @@ without choosing any branch active.
 ## Executed locally (Windows, Rust 1.99.1)
 
 - `cargo test --workspace`: lexer, manifest, parser, transform and CLI tests.
-- `cargo test --workspace -- --ignored --nocapture`: four explicit real-DDNet
+- `cargo test --workspace -- --ignored --nocapture`: six explicit real-DDNet
   integration tests passed (lexer scan, parser scan, real selector/body tests,
-  and real HEAD/TAIL/config rendering).
+  HEAD/TAIL/config rendering, real CMake anchors, repeated real-DDNet staging).
 - Real `CGameClient::OnInit`, `OnRender` and `OnConsoleInit` resolved with exact
   paired body braces; CGameClient class found in the actual header.
 - `CCollision::GetIndex` overload ambiguity rejected; exact `(int Nx, int Ny)`
@@ -48,7 +48,13 @@ without choosing any branch active.
 - `ddmix plan --ddnet workspace/ddnet --mods examples`: three patches, across
   the real gameclient.cpp and config_variables.h, without modifying upstream.
 - CLI regression verifies identical plan/check output, path traversal rejection,
-  and no writes to source or `.ddmix`.
+  and no writes to source or `.ddmix` during plan/check.
+- Real `apply` run twice: identical ownership state/generated files, one managed
+  include and one HEAD snippet, upstream unchanged. External overlay not copied.
+- Unit tests reject manually modified or unowned staging, source/staging path
+  overlap and overlays shadowing upstream. Unix-only symlink tests are in CI.
+- CMake itself configures a dependency-free target probe and confirms generated
+  source/include/checksum properties, including paths with spaces.
 - Formatting, Clippy with warnings denied, and native release build passed.
 
 Machine-readable local output is under `target/reports/` (not committed).
@@ -62,8 +68,16 @@ against the pinned DDNet checkout. These remote jobs have not been observed.
 
 ## Remaining gaps
 
-No staged apply, idempotency state, generated CMake integration, component
-registration, config collision analysis, complete C++ AST, or DDNet client build
-exists yet. Source-only plan/check do not validate build integration or snippet
-semantics. No DDNet configure/build was attempted. Linux/macOS binaries and Rust
-1.85 minimum-version compatibility have not been tested locally.
+Real staged-DDNet configure was attempted with MSVC 19.51.36260.0 and Python
+3.12.10. Configure stops before full generation because Curl, SQLite3, libpng,
+Freetype, Ogg, Opus, Opusfile and SDL2 are missing. The original checkout's
+`ddnet-libs` directory is empty. No dependencies were installed automatically.
+The full client compile remains unverified; configure failure returns nonzero.
+Logs: `target/reports/ddnet-configure.log`.
+
+Component registration, config collision analysis and a complete C++ AST are
+not implemented. Plan/check validate CMake structural integration, not configure
+or snippet semantics. Copy staging intentionally omits Git metadata. Source
+mutation during a build/apply and hostile filesystem races are unsupported.
+Linux/macOS binaries and Rust 1.85 minimum-version compatibility have not been
+tested locally. See [staging workflow](staging.md).

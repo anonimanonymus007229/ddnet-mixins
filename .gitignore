@@ -1,4 +1,7 @@
 /target/
 /workspace/
 /.ddmix/
+/.ddmix-next/
+/.ddmix-previous/
+/.ddmix.lock
 *.tmp

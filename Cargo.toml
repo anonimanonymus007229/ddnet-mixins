@@ -14,6 +14,8 @@ mixins-manifest = { path = "crates/mixins-manifest" }
 mixins-lexer = { path = "crates/mixins-lexer" }
 mixins-parser = { path = "crates/mixins-parser" }
 mixins-transform = { path = "crates/mixins-transform" }
+mixins-cmake = { path = "crates/mixins-cmake" }
+mixins-build = { path = "crates/mixins-build" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

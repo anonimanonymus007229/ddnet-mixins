@@ -1,8 +1,9 @@
 # DDNet Mixins
 
 Rust tooling for independent DDNet mods without editing the upstream checkout.
-**Early implementation: discovery, conservative structural indexing and read-only
-source edit planning.** Staging/build integration is not implemented yet.
+**Early implementation:** conservative C++ indexing, generic edit planning,
+isolated staging and CMake source-overlay integration. Full DDNet compilation
+is currently blocked locally by missing dependencies; components are not yet supported.
 
 ## Build and run
 
@@ -18,6 +19,8 @@ ddmix inspect --ddnet ./workspace/ddnet > corpus.json
 ddmix locate --file ./workspace/ddnet/src/game/client/gameclient.cpp --function CGameClient::OnInit
 ddmix plan --ddnet ./workspace/ddnet --mods ./examples > plan.json
 ddmix check --ddnet ./workspace/ddnet --mods ./examples
+ddmix apply --workspace ./workspace --ddnet ./workspace/ddnet --mods ./examples
+ddmix build --workspace ./workspace --ddnet ./workspace/ddnet --mods ./examples --build-dir ./workspace/build-ddmix
 ```
 
 `init` requires an existing parent directory and refuses an existing destination.
@@ -33,7 +36,7 @@ source-located unsupported regions, **not** complete C++ semantic validity.
 - Sorted recursive `.cpp`/`.h` overlay discovery. Other extensions are ignored.
   Only `src/game/client/** -> game-client` is supported; unknown ownership fails.
 - Inputs under a discovered mod/source tree may not be symlinks. Explicit roots
-  are canonicalized. No command currently modifies DDNet.
+  are canonicalized. The original DDNet checkout is never modified.
 - Project-owned C++ lexer: exact byte spans and line/column positions, trivia,
   comments, prefixed/escaped/raw literals, numbers, operators, continued
   directives, conditional nesting validation.
@@ -42,6 +45,13 @@ source-located unsupported regions, **not** complete C++ semantic validity.
 - Generic INSERT/REPLACE/REMOVE planner, function/comment targets, restricted
   class-body inserts, conflict checks and deterministic same-offset ordering.
 - HEAD/TAIL aliases lower to generic edits. See [edit semantics](docs/edits.md).
+- Fresh staged copies under `.ddmix/staging/ddnet`, SHA-256 ownership inventory,
+  repeated-apply stability and protection against overwriting manual changes.
+- Own CMake command/block scanner places a managed include after platform target
+  creation; external mod sources/includes are attached to `game-client`.
+- `CHECKSUM_SRC` additions outside DEV and an actual checksum-array capacity guard.
+- `build` applies, configures and builds the staged client. See
+  [staging/build workflow](docs/staging.md) for safeguards and current limitations.
 
 Example `mixin.toml`:
 
@@ -61,7 +71,7 @@ ddnet = "*"
 
 Only `*` version constraints are currently accepted. Unknown manifest fields
 (including unimplemented components) fail rather than being silently ignored.
-Edits and HEAD/TAIL injections are supported for read-only planning; see
+Edits and HEAD/TAIL injections support planning and staged application; see
 `examples/basic-hooks/mixin.toml`. Mod sources remain in their own `src/` trees.
 
 ## Validation
@@ -74,5 +84,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 The explicitly invoked integration test uses `workspace/ddnet` by default, or
 `DDMIX_TEST_DDNET` for a different real checkout. It fails if that corpus is
-missing; ordinary unit tests do not require an upstream download. See
+missing; ordinary tests do not require an upstream download, but CMake is required
+along with a C++ compiler for the generated-target-properties integration test. See
 [validation](docs/validation.md) and [roadmap](docs/roadmap.md).

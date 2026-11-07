@@ -41,6 +41,30 @@ enum Commands {
         #[arg(long)]
         mods: PathBuf,
     },
+    /// Regenerate isolated .ddmix/staging/ddnet; never edit the supplied DDNet.
+    Apply {
+        #[arg(long)]
+        workspace: PathBuf,
+        #[arg(long)]
+        ddnet: PathBuf,
+        #[arg(long)]
+        mods: PathBuf,
+    },
+    /// Apply, then configure and build the staged game-client (build output is external).
+    Build {
+        #[arg(long)]
+        workspace: PathBuf,
+        #[arg(long)]
+        ddnet: PathBuf,
+        #[arg(long)]
+        mods: PathBuf,
+        /// Existing-parent build directory outside .ddmix and the input checkout.
+        #[arg(long)]
+        build_dir: PathBuf,
+        /// Additional configure arguments, e.g. --cmake-arg=-DHEADLESS_CLIENT=ON.
+        #[arg(long, allow_hyphen_values = true)]
+        cmake_arg: Vec<String>,
+    },
     /// Resolve one supported function definition in a source file, without editing it.
     Locate {
         #[arg(long)]
@@ -113,56 +137,90 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(true)
         }
         Commands::Plan { ddnet, mods } | Commands::Check { ddnet, mods } => {
+            let plan = mixins_build::plan(&ddnet, &mods)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&plan).map_err(|e| e.to_string())?
+            );
+            Ok(true)
+        }
+        Commands::Apply {
+            workspace,
+            ddnet,
+            mods,
+        } => {
+            let staged = mixins_build::apply(&workspace, &ddnet, &mods)?;
+            println!("{}", serde_json::json!({ "staged_ddnet": staged }));
+            Ok(true)
+        }
+        Commands::Build {
+            workspace,
+            ddnet,
+            mods,
+            build_dir,
+            cmake_arg,
+        } => {
+            let workspace = workspace.canonicalize().map_err(|e| e.to_string())?;
             let ddnet = ddnet.canonicalize().map_err(|e| e.to_string())?;
-            if !ddnet.join("CMakeLists.txt").is_file() {
-                return Err("DDNet root requires CMakeLists.txt".into());
-            }
-            let mods = mixins_manifest::discover(&mods)?;
-            let mut grouped: std::collections::BTreeMap<
-                String,
-                Vec<(String, mixins_transform::Edit)>,
-            > = std::collections::BTreeMap::new();
-            for m in &mods {
-                let mut edits = m.manifest.edits.clone();
-                edits.extend(m.manifest.injections.iter().map(|i| i.lower()));
-                edits.sort_by(|a, b| (a.priority, &a.id).cmp(&(b.priority, &b.id)));
-                for edit in edits {
-                    grouped
-                        .entry(edit.file.clone())
-                        .or_default()
-                        .push((m.manifest.package.id.clone(), edit));
-                }
-            }
-            let mut plans = std::collections::BTreeMap::new();
-            for (file, edits) in grouped {
-                // Reject symlink components, even if canonicalization would stay
-                // inside DDNet. Future staging must not mutate their targets.
-                let mut path = ddnet.clone();
-                for component in file.split('/') {
-                    path.push(component);
-                    if fs::symlink_metadata(&path)
-                        .map_err(|e| format!("{}: {e}", path.display()))?
-                        .file_type()
-                        .is_symlink()
-                    {
-                        return Err(format!("symlink edit path forbidden: {}", path.display()));
-                    }
-                }
-                if !path
+            let build_dir = if build_dir.exists() {
+                build_dir.canonicalize().map_err(|e| e.to_string())?
+            } else {
+                let absolute = std::path::absolute(&build_dir).map_err(|e| e.to_string())?;
+                absolute
+                    .parent()
+                    .ok_or("build directory needs a parent")?
                     .canonicalize()
                     .map_err(|e| e.to_string())?
-                    .starts_with(&ddnet)
-                {
-                    return Err(format!("path escapes DDNet: {file}"));
-                }
-                let source =
-                    fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                let refs: Vec<_> = edits.iter().map(|(id, e)| (id.as_str(), e)).collect();
-                let plan = mixins_transform::Plan::resolve(&source, &refs)?;
-                plan.render(&source)?;
-                plans.insert(file, plan);
+                    .join(absolute.file_name().ok_or("build directory needs a name")?)
+            };
+            if build_dir.starts_with(workspace.join(".ddmix"))
+                || build_dir.starts_with(&ddnet)
+                || ddnet.starts_with(&build_dir)
+                || workspace.starts_with(&build_dir)
+            {
+                return Err("build directory must be outside generated staging and the input checkout, and must not contain the workspace".into());
             }
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "schema_version": 1, "stage": "source-edits-only", "files": plans, "cmake_integration_validated": false })).map_err(|e| e.to_string())?);
+            // Do not permit command-line overrides of source/binary roots or the
+            // workspace variable. Explicit cache options and generator are enough.
+            if cmake_arg.iter().any(|a| {
+                !(a.starts_with("-D") && a.contains('=')) || a.contains("DDMIX_WORKSPACE_ROOT")
+            }) {
+                return Err("unsafe/reserved CMake argument".into());
+            }
+            let staged = mixins_build::apply(&workspace, &ddnet, &mods)?;
+            let status = Command::new("cmake")
+                .arg("-S")
+                .arg(mixins_build::cmake_path(&staged)?)
+                .arg("-B")
+                .arg(mixins_build::cmake_path(&build_dir)?)
+                .args(cmake_arg)
+                // Avoid discovering the unrelated Mixins parent Git repository.
+                .env(
+                    "GIT_CEILING_DIRECTORIES",
+                    mixins_build::cmake_path(&workspace.join(".ddmix/staging"))?,
+                )
+                .arg(format!(
+                    "-DDDMIX_WORKSPACE_ROOT={}",
+                    mixins_build::cmake_path(&workspace)?
+                ))
+                .status()
+                .map_err(|e| format!("cannot run cmake: {e}"))?;
+            if !status.success() {
+                return Err(format!("CMake configure failed: {status}"));
+            }
+            let status = Command::new("cmake")
+                .arg("--build")
+                .arg(mixins_build::cmake_path(&build_dir)?)
+                .args(["--target", "game-client", "--config", "Release"])
+                .env(
+                    "GIT_CEILING_DIRECTORIES",
+                    mixins_build::cmake_path(&workspace.join(".ddmix/staging"))?,
+                )
+                .status()
+                .map_err(|e| format!("cannot run cmake build: {e}"))?;
+            if !status.success() {
+                return Err(format!("CMake build failed: {status}"));
+            }
             Ok(true)
         }
         Commands::Locate {
