@@ -1,26 +1,31 @@
-# Executable distribution
+# Installing and packaging the executable
 
-`cargo build --release --locked` produces `target/release/ddmix.exe` on Windows
-or `target/release/ddmix` on Linux/macOS. Copy the executable to a directory on
-PATH. Cargo/Rust are not needed to run it; DDNet compilation still needs its own
-compiler, CMake, Python, Rust and third-party dependencies.
+Build from source with Rust/Cargo:
 
-`.github/workflows/release.yml` builds ZIP archives containing executable,
-README and MIT license, plus archive SHA-256 checksums, for:
+```sh
+cargo build --release --locked
+```
 
-- Windows x86_64 MSVC;
-- Linux x86_64 GNU;
-- macOS x86_64;
-- macOS ARM64.
+Copy `target/release/ddmix.exe` (Windows) or `target/release/ddmix` (Linux/macOS)
+to a directory on PATH. Running ddmix does not require Cargo; building DDNet still
+requires its own toolchain and dependencies. On Unix, preserve executable
+permissions when extracting an archive, or run `chmod +x ddmix`.
 
-A manual workflow run uploads Actions artifacts. Pushing a `v*` tag additionally
-publishes those archives as GitHub Release assets. No tag/release has been
-published by this development session, and remote jobs have not been observed.
-Only the Windows executable has been built/tested locally. Generate its local
-archive with `python scripts/package.py --binary target/release/ddmix.exe --target x86_64-pc-windows-msvc`. Other platform
-support remains CI-validation pending, not a claim of tested binaries.
+## Packaging for maintainers
 
-Archives are platform-specific; Linux builds use the runner's libc baseline.
-On Unix preserve executable permissions when extracting, or use `chmod +x ddmix`.
-There is no installer, automatic updater, signing or notarization yet. Review
-the workflow's permissions before enabling release publication in a fork.
+Package an already-built executable with its README, MIT license and archive
+SHA-256 checksum:
+
+```sh
+python scripts/package.py --binary target/release/ddmix.exe --target x86_64-pc-windows-msvc
+```
+
+Output goes to `target/dist/`. Use the matching binary path and target label
+when packaging another platform.
+
+The [release workflow](../.github/workflows/release.yml) builds Windows x86_64
+MSVC, Linux x86_64 GNU, macOS x86_64 and macOS ARM64 archives. Run it manually
+for Actions artifacts; pushing a `v*` tag also publishes GitHub Release assets.
+Check workflow results before distributing a platform's archive. Linux archives
+use the runner's libc baseline. Binaries are not signed or notarized; there is
+no installer or automatic updater.

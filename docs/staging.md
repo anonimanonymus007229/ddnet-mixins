@@ -1,109 +1,93 @@
-# Isolated staging and build
+# Staging and build
+
+Staging is the generated copy of DDNet with mods applied. Edit your mod files
+and original checkout, not this copy. The original DDNet checkout stays unchanged.
+
+## Plan, apply and build
+
+Run from the Mixins repository, or replace the paths with your own workspace:
 
 ```sh
-ddmix plan --ddnet workspace/ddnet --mods examples > plan.json
+ddmix plan --ddnet workspace/ddnet --mods examples --diff
 ddmix check --ddnet workspace/ddnet --mods examples
 ddmix apply --workspace workspace --ddnet workspace/ddnet --mods examples
-ddmix build --workspace workspace --ddnet workspace/ddnet --mods examples --build-dir workspace/build-ddmix --cmake-arg=-DHEADLESS_CLIENT=ON --cmake-arg=-DSERVER=OFF --cmake-arg=-DTOOLS=OFF --cmake-arg=-DDOWNLOAD_GTEST=OFF
+ddmix build --workspace workspace --ddnet workspace/ddnet --mods examples --build-dir workspace/build-ddmix
 ```
 
-All supplied roots must exist. Plan/check are read-only and validate source edit
-resolution, overlay ownership and CMake structural placement, not a compiler or
-CMake configure run. JSON explicitly distinguishes structural CMake validation
-from configure/compile validation. Input hashes cover the edited source files;
-this is not a lockfile for the complete external mod/source environment.
+`plan` and `check` are read-only. They validate source selectors, conflicts,
+overlay mapping and CMake placement, but do not execute CMake or a compiler.
+`apply` creates the modified copy; `build` applies first, then configures CMake
+and builds `game-client` (Release for multi-config generators).
 
-## Generated ownership
+The workspace, DDNet and mods roots must exist. Keep the build directory outside
+`.ddmix` and the original checkout. DDNet's compiler, CMake, Python, Rust and
+third-party dependencies must be installed; `ddmix` does not install them.
+Extra CMake cache settings use `--cmake-arg=-DNAME=VALUE`. Source/build root
+overrides, script modes and overrides of DDMIX_WORKSPACE_ROOT are rejected.
 
-Apply copies original DDNet files (excluding root `.git`) into a fresh sibling
-transaction, renders edits there, then publishes `.ddmix` with renames. No hard
-links or symlinks are created in staging. Source/mod symlinks and nonregular
-files fail before copying. The optional external dependency tree has a separate
-read-only policy: internal file/directory symlinks are resolved and copied as
-ordinary files/directories; escaping, broken and cyclic links are rejected. Mod files remain in their original directories. Conflicting logical
-overlay paths and overlays shadowing original DDNet files fail explicitly.
+## Separate dependency checkout
 
-`.ddmix` contains:
-
-- `staging/ddnet/`: transformed source copy;
-- `generated.cmake`: external target sources/includes and checksum additions;
-- `plan.json`: source patch plan, input hashes and generated CMake;
-- `state.json`: ownership version and SHA-256 inventory of generated regular files.
-
-Every apply starts from original DDNet, preventing duplicate injections. Before
-replacing an existing output, its ownership and full inventory are verified.
-Manual modifications/additions/deletions in staging or generated output cause a
-failure: preserve those changes elsewhere and remove `.ddmix` yourself if you
-intend to regenerate. The state file is ownership metadata, not a tamper-proof
-security boundary. Never use it to authorize untrusted output.
-
-A create-new `.ddmix.lock` serializes apply transactions. Interrupted transactions
-may leave `.ddmix-next`, `.ddmix-previous` or the lock; the next apply refuses to
-silently delete them. Inspect/recover/remove those paths manually. Publication
-rolls back on a normal rename failure; it is not power-loss-atomic across both
-renames. Source/mod inputs must not be changed concurrently. This version does
-not defend against hostile concurrent filesystem replacement.
-
-## CMake integration
-
-The project-owned scanner handles quoted/bracket arguments, line/bracket
-comments, nested parentheses and block nesting. It finds literal `game-client`
-creation commands and their common platform conditional end. Complex unknown
-structures fail instead of using line numbers. The staged root gets one marked
-include before later target configuration. The generated file guards
-`if(TARGET game-client)` and uses scoped PRIVATE sources/includes. Paths are
-absolute and quoted; spaces are supported; semicolons, dollar expressions and
-control-line breaks are rejected rather than ambiguously escaped.
-
-Configure must pass `-DDDMIX_WORKSPACE_ROOT=<workspace>`; the build command does
-so automatically. Mod directories may live outside the workspace. The include
-is not based on the staged directory. Regeneration operates on a pristine input;
-managed markers in the original CMake are rejected, not appended again.
-
-Inspection of supplied DDNet found `set_src()` appends ordinary source files to
-`CHECKSUM_SRC`; `DEV` later clears this list. Mixins appends external files when
-NOT DEV, preserving that policy. Before `configure_file(checksummed_extra.txt)`
-it checks source count plus actual extra-template line count against the parsed
-`m_aFiles[N]` capacity. Capacity overflow is a configure error, not generated
-out-of-bounds C++. Unsupported checksum layouts fail planning.
-
-## Build and environment
-
-Build outputs go into an explicit directory outside `.ddmix` and original DDNet.
-CMake may write arbitrary outputs there; use a dedicated directory.
-The CLI streams native output to stderr and saves `ddmix-configure.log` and
-`ddmix-build.log` in this directory, including when quiet mode is selected.
-See [logging](logging.md) for verbosity, error tails and summary counts. Only extra
-`-DNAME=VALUE` cache settings are accepted. Reserved workspace overrides and
-alternate source/binary/script modes are rejected. Default generator discovery
-is used. `build` always configures then builds target game-client, Release for
-multi-config generators. Source files must stay immutable between apply and
-build; no concurrent build/apply support is promised yet.
-
-The build wrapper caps Git parent discovery so DDNet staging does not mistake
-the enclosing Mixins repository for its own checkout. This copy-based mode does
-not preserve original Git revision metadata; a future worktree/metadata mode is
-needed for that. Manual CMake users should set `GIT_CEILING_DIRECTORIES` to the
-staging parent for equivalent behavior.
-
-Full Release configuration/build was validated locally with MSVC and a separate
-pinned ddnet-libs checkout, including a declared component. To reproduce without
-modifying the original checkout's empty submodule directory:
+If the original DDNet lacks its dependencies, supply a separate ddnet-libs
+checkout. It is copied only into staging; populated dependencies are not replaced.
+See [reference revisions](compatibility.md#ddnet-versions-and-build-targets).
 
 ```sh
-git clone --depth 1 https://github.com/ddnet/ddnet-libs.git workspace/dependencies/ddnet-libs
-# Tested dependency revision: c0e6703fbcdbe03df2f26875427ec3951ce4ec21
-ddmix build --workspace workspace --ddnet workspace/ddnet --mods examples --libraries workspace/dependencies/ddnet-libs --build-dir workspace/build-ddmix --cmake-arg=-DVIDEORECORDER=OFF --cmake-arg=-DSERVER=OFF --cmake-arg=-DTOOLS=OFF --cmake-arg=-DDOWNLOAD_GTEST=OFF --cmake-arg=-DVULKAN=OFF --cmake-arg=-DPREFER_BUNDLED_LIBS=ON
+git clone https://github.com/ddnet/ddnet-libs.git workspace/dependencies/ddnet-libs
+git -C workspace/dependencies/ddnet-libs checkout c0e6703fbcdbe03df2f26875427ec3951ce4ec21
+ddmix build --workspace workspace --ddnet workspace/ddnet --mods examples --libraries workspace/dependencies/ddnet-libs --build-dir workspace/build-ddmix --cmake-arg=-DVIDEORECORDER=OFF --cmake-arg=-DVULKAN=OFF --cmake-arg=-DSERVER=OFF --cmake-arg=-DTOOLS=OFF --cmake-arg=-DDOWNLOAD_GTEST=OFF --cmake-arg=-DPREFER_BUNDLED_LIBS=ON
 ```
 
-The optional libraries directory is validated and copied into staged ddnet-libs,
-not symlinked or installed globally. Official SDL framework links (including
-chained links and Git-for-Windows links ending in a separator) are materialized
-as independent files/directories. Each resolved target must stay inside the
-canonical dependency root. Cycles, broken links and excessive expansion fail
-before the staging transaction starts. Git metadata is excluded. This does not
-relax the prohibition on links in mod inputs, editable DDNet sources or output
-inventory. Existing populated dependencies are not
-overridden. Build subprocesses disable Python bytecode writes so upstream build
-scripts do not pollute the staged inventory with __pycache__. A separate CMake
-probe verifies generated source/include/checksum properties and paths with spaces.
+Source/mod symlinks are rejected. Internal dependency links are materialized as
+ordinary files/directories; external, broken or cyclic links fail. Staging uses
+independent copies, not links to files in the original tree.
+
+## Generated files and repeated application
+
+Under the selected workspace, `.ddmix/` contains:
+
+| Path | Purpose |
+|---|---|
+| `staging/ddnet/` | DDNet copy with source and CMake edits |
+| `generated.cmake` | Mod source files and include paths for game-client |
+| `plan.json` | Resolved edits and input hashes |
+| `state.json` | Ownership metadata and generated-file hashes |
+
+Every apply starts from the original DDNet, so inserts do not accumulate.
+Mod source files stay in their packages and are referenced by CMake. Hashes in
+the plan are not a lockfile for all external source files or dependencies.
+
+Before replacing `.ddmix`, the tool checks its ownership and file inventory.
+Manual additions, changes or deletions cause an error instead of being overwritten.
+Save any changes you need elsewhere, then remove `.ddmix` if you intend to
+regenerate it. Do not edit state.json to bypass the check.
+
+## Recovering from interrupted apply
+
+Only one apply can hold `.ddmix.lock`. An interrupted operation can leave
+`.ddmix-next` (new transaction), `.ddmix-previous` (previous output) or the lock.
+The next apply refuses to delete them automatically.
+
+1. Ensure no apply/build process is running.
+2. Inspect these directories and preserve any files you need outside generated state.
+3. If publication was interrupted and `.ddmix` is missing, restore
+   `.ddmix-previous` to `.ddmix` to retain the previous output, or remove generated
+   state and regenerate from the original checkout.
+4. Remove abandoned transaction directories and the stale lock before retrying.
+
+Do not remove a lock held by a running process or change inputs during build/apply.
+
+## CMake and diagnostics
+
+Mixins adds a marked include after `game-client` creation and attaches external
+sources/includes to that target. Unknown target-creation or checksum layouts
+fail planning. Files contribute to source checksums outside DEV mode; exceeding
+DDNet's checksum capacity fails configuration.
+
+`build` passes DDMIX_WORKSPACE_ROOT automatically. For manual configuration of
+staged sources, pass `-DDDMIX_WORKSPACE_ROOT=<absolute-workspace-path>` and set
+GIT_CEILING_DIRECTORIES to the staging parent to avoid Git discovering an
+unrelated parent repository. Copy staging excludes original Git metadata.
+
+Build output and the complete `ddmix-configure.log` / `ddmix-build.log` transcripts
+live in the build directory. See [logging](logging.md) for verbosity and error
+output, and [compatibility](compatibility.md) for unsupported constructs.

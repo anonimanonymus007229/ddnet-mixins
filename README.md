@@ -4,7 +4,7 @@ Create DDNet mods as separate packages and apply them without editing the origin
 
 `ddmix` reads TOML manifests, inserts code into supported C++ functions or around comments, and connects mod-owned client sources to DDNet's CMake target. It prepares a separate working copy for compilation, so mod developers can keep their changes outside upstream source files.
 
-**Early development:** transformations, component registration and isolated application are tested against real DDNet. A Windows Release client with the example mods has been compiled locally. The C++ parser remains conservative; unsupported constructs fail rather than being guessed.
+**Early development:** the parser covers a subset of C++ and rejects targets it cannot resolve safely. Check the [compatibility limits](docs/compatibility.md) before choosing a DDNet revision or injection type.
 
 ## Quick start
 
@@ -115,12 +115,11 @@ Dependencies have deterministic ordering; compatibility and dependency version c
 
 - [Edit syntax, selectors and limitations](docs/edits.md)
 - [Staging, ownership checks, CMake and build recovery](docs/staging.md)
-- [Real-DDNet validation and known gaps](docs/validation.md)
-- [Development roadmap](docs/roadmap.md)
+- [Compatibility and limitations](docs/compatibility.md)
 - [CLI logging and build progress](docs/logging.md)
 - [Helper functions and explicit bindings](docs/helpers.md)
 - [Advanced injections and components](docs/advanced-injections.md)
-- [Binary packaging and platform status](docs/distribution.md)
+- [Executable installation and packaging](docs/distribution.md)
 - [Basic hooks](examples/basic-hooks), [file-based hook](examples/controls-hook), [helper bindings](examples/controls-helper), [advanced hooks](examples/advanced-hooks) and [component](examples/component) examples
 
 ## Development

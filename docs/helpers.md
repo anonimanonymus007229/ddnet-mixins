@@ -123,5 +123,4 @@ Helpers return void. Bare `return;` exits the helper only; return values,
 coroutines, goto, implicit this and cancellation are unsupported. No `cancellable`
 field or automatic interception of the target's return is implemented. For a
 textual in-body return, use content/content_file and understand the target's
-return type; that is different from a helper. These restrictions deliberately
-avoid inventing Horizon's Rust-specific cancellation/return conventions in C++.
+return type; that is different from a helper.

@@ -1,4 +1,4 @@
-# Source edit planning (schema 0.1)
+# Source edits and injections
 
 ```sh
 ddmix locate --file workspace/ddnet/src/game/client/gameclient.cpp --function CGameClient::OnInit
@@ -14,7 +14,7 @@ identifier/console-name collisions, respecting exclusive preprocessor arms.
 `apply` uses the plan in an isolated copy; `build` runs CMake against it. See
 [staging](staging.md).
 
-`examples/basic-hooks/mixin.toml` is a complete tested real-DDNet example.
+See [examples/basic-hooks](../examples/basic-hooks) for a complete mod package.
 
 ## Targets and actions
 
@@ -28,8 +28,7 @@ identifier/console-name collisions, respecting exclusive preprocessor arms.
   headers without preprocessing or rewriting them.
 - `target = { kind = "class", name = "N::C" }` currently supports body-boundary
   insertion only, and only in files with no unsupported structural regions.
-  Other class operations are explicitly rejected until full declaration spans
-  and uniqueness guarantees are available.
+  Other class operations are rejected.
 
 `action` is INSERT, REPLACE or REMOVE. INSERT requires `position`:
 BEFORE, AFTER, BODY_START or BODY_END (the latter two require a body).
@@ -95,21 +94,11 @@ should supply CRLF if uniform line endings are desired.
 
 ## Safety and limitations
 
-The parser handles common qualified definitions, simple namespaces/classes,
-constructors/destructors and common member qualifiers.
-It skips bodies structurally, so nested lambdas/control flow are not confused
-with top-level definitions. Declaration-only/defaulted/deleted methods are indexed
-separately; edit selectors still select definitions with real bodies.
-Simple template heads/types, common operators, noexcept expressions, trailing
-returns and parenthesized ctor initializer lists now have initial support.
-Complex declarators, braced ctor initializers, anonymous namespaces and many
-macro-decorated declarations remain unsupported and are source-located.
-The count is an inventory of skipped regions, not necessarily invalid C++.
+Selectors require exactly one supported target. Missing or ambiguous matches,
+structural errors and potentially matching unsupported regions cause a failure,
+not a guessed insertion. Function selectors choose definitions with real bodies,
+not declaration-only/defaulted/deleted methods.
 
-Branch-local delimiters are paired without choosing active macros. Branches
-that change their inherited delimiter stack produce diagnostics; selection in
-such files fails. Unsupported regions containing a queried function's bare
-identifier also block selection: they might hide another overload. This is
-intentionally conservative and can reject an otherwise valid target. This is
-not complete semantic C++ lookup, macro expansion or a claim of universal
-selector safety. Staged application never writes to the original input.
+The tool does not type-check snippets or expand macros. See
+[compatibility](compatibility.md#c-parsing-and-selectors) for grammar and
+preprocessor restrictions. Staged application never writes to the original input.

@@ -59,7 +59,7 @@ Headers are included before the existing gameclient header content (mod headers
 must have their own guards). Component declarations are currently tied to the
 supplied DDNet registration layout, not a promise of compatibility with all
 older/future versions. Only the compiler confirms complete base-class/lifecycle
-compatibility. A Release DDNet client containing this example was built locally.
+compatibility.
 
 ## Config conflict checks
 
@@ -69,12 +69,5 @@ mutually exclusive and do not conflict; no macro expression is evaluated. Two
 separate #if expressions are conservatively considered able to coexist.
 Macro argument splitting uses tokens and delimiter pairs, not comma splitting.
 
-## Parser scope
-
-Added grammar coverage includes simple template declaration heads and template
-return types, common operator declarators, noexcept expressions, trailing return
-types, and parenthesized constructor initializers. Nested function bodies remain
-opaque for declaration lookup. Function-pointer declarators, arbitrary template
-expressions, braced constructor initializers, anonymous namespaces, preprocessing
-expansion and full C++ semantic analysis remain unsupported or conservative.
-Do not interpret unsupported-region inventory as a complete AST.
+For supported C++ patterns and target restrictions, see
+[compatibility and limitations](compatibility.md).
