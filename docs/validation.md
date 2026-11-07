@@ -35,7 +35,7 @@ without choosing any branch active.
 ## Executed locally (Windows, Rust 1.99.1)
 
 - `cargo test --workspace`: lexer, manifest, parser, transform and CLI tests.
-- `cargo test --workspace -- --ignored --nocapture`: ten explicit real-DDNet
+- `cargo test --workspace -- --ignored --nocapture`: eleven explicit real-DDNet
   integration tests passed (lexer scan, parser scan, real selector/body tests,
   HEAD/TAIL/config rendering, real CMake anchors, repeated real-DDNet staging).
 - Real `CGameClient::OnInit`, `OnRender` and `OnConsoleInit` resolved with exact
@@ -96,7 +96,18 @@ transformed controls.cpp. File/inline plans lower identically, content is read
 fresh, UTF-8/CRLF are preserved, ambiguous source fields and unsafe paths fail.
 Unix symlink tests are CI-only locally.
 
-The regular suite has 31 passing tests; explicit corpus tests cover config
+Helper validation generates a static void function immediately before
+CControls::SnapInput and passes this, pData and an int& member binding. Full
+Windows Release client build passed with this example and the existing mods:
+`target/reports/helper-client-build.log`. Helper bodies are not separate CMake
+compilation units. Tests cover malformed/mutually exclusive fields, reserved or
+duplicate binding names, unsafe types/values, invalid bodies and unsupported
+target scopes, plus multiple helpers with collision-free names.
+
+A separate CMake runtime probe compiles and executes HEAD/TAIL helpers: int&
+forwarding mutates original state and bare helper return does not exit the target.
+
+The regular suite has 35 passing tests; explicit corpus tests cover config
 collisions, real component lowering/diff and real advanced selectors in addition
 to earlier scans/staging. Release packaging workflow covers Windows x86_64,
 Linux x86_64, macOS Intel/ARM64 but has not been run remotely. A local Windows

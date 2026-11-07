@@ -126,6 +126,31 @@ pub fn load(path: &Path) -> Result<Manifest, String> {
             })?;
         }
         use mixins_transform::InjectionKind as K;
+        if let Some(relative) = &i.helper {
+            i.helper_content = read_hook(path, relative).map_err(|e| {
+                format!(
+                    "{}: mod {}, injection {}, helper {relative:?}: {e}",
+                    path.display(),
+                    m.package.id,
+                    i.id
+                )
+            })?;
+            if !matches!(i.kind, K::Head | K::Tail) || !i.file.ends_with(".cpp") {
+                return Err(format!(
+                    "{}: injection {}: helper requires HEAD/TAIL and a .cpp target",
+                    path.display(),
+                    i.id
+                ));
+            }
+            mixins_transform::helpers::validate(&i.bindings, &i.helper_content).map_err(|e| {
+                format!(
+                    "{}: mod {}, injection {}: {e}",
+                    path.display(),
+                    m.package.id,
+                    i.id
+                )
+            })?;
+        }
         let call = matches!(i.kind, K::BeforeCall | K::AfterCall | K::ModifyArg);
         if call != i.callee.is_some()
             || matches!(i.kind, K::ModifyArg) != i.argument.is_some()

@@ -38,7 +38,8 @@ omit position. Every edit has a unique lowercase/hyphenated `id`, a normalized
 `src/...` file path, and optional integer `priority` (default 0).
 
 `[[injections]]` requires `id`, `file`, fully qualified `target`, a `kind`, and
-exactly one of inline `content` or `content_file = "hooks/filename.cpp"`.
+exactly one of inline `content`, `content_file = "hooks/filename.cpp"`, or
+`helper = "hooks/filename.cpp"` (HEAD/TAIL only).
 `parameters` and `priority` are optional. HEAD lowers
 to INSERT/BODY_START and TAIL to INSERT/BODY_END. **TAIL is the lexical body
 end, not execution before every return.** No return interception is implied.
@@ -75,9 +76,11 @@ body snippet. `hooks/` is not scanned as an overlay or added to target_sources.
 This works for every injection kind, including WRAP (`{{original}}` is checked
 after reading the file). Empty snippets are permitted, like explicit empty
 inline content. Generic `[[edits]]` still uses inline `content`; `content_file`
-is currently an injection field only. There is no `helper`/`bindings` adapter or
-automatically generated helper function: this feature performs textual insertion
-at validated syntax spans. See `examples/controls-hook` for a real DDNet example.
+is currently an injection field only. `content_file` performs textual insertion
+at validated syntax spans; see `examples/controls-hook`. For a separate generated
+function with explicit parameters use [helper and bindings](helpers.md), as in
+`examples/controls-helper`. It is a different mode, not implicit helper generation
+for every snippet.
 
 ## Ordering, conflicts and preservation
 

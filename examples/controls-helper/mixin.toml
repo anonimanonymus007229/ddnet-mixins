@@ -1,0 +1,16 @@
+[mod]
+id = "controls-helper"
+name = "SnapInput helper with explicit bindings"
+version = "0.1.0"
+
+[[injections]]
+id = "snapinput-helper"
+file = "src/game/client/components/controls.cpp"
+target = "CControls::SnapInput"
+kind = "HEAD"
+helper = "hooks/ccontrols_snapinput.cpp"
+bindings = [
+  { name = "controls", ty = "CControls *", value = "this" },
+  { name = "data", ty = "int *", value = "pData" },
+  { name = "player_flags", ty = "int &", value = "m_aInputData[g_Config.m_ClDummy].m_PlayerFlags" },
+]

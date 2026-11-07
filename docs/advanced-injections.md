@@ -1,6 +1,8 @@
 # Advanced injections and component declarations
 
 All aliases resolve against original spans and lower to INSERT/REPLACE/REMOVE.
+HEAD/TAIL additionally support [separate void helpers with bindings](helpers.md);
+the body is loaded from hooks/ and both the free function and call are generated.
 See `examples/advanced-hooks/mixin.toml` for real-DDNet examples. This version
 supports a deliberately bounded subset, not arbitrary C++ rewriting.
 

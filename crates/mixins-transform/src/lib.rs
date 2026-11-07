@@ -1,5 +1,6 @@
 //! Resolve every edit against immutable original spans, then validate the whole
 //! plan. This crate performs no filesystem writes and knows nothing about DDNet.
+pub mod helpers;
 use mixins_lexer::{Kind, lex};
 use mixins_parser::{Span, parse};
 use serde::{Deserialize, Serialize};
@@ -91,10 +92,20 @@ pub struct Injection {
     /// Resolved snippet text. Manifest loading reads content_file before lowering.
     pub content: String,
     pub content_file: Option<String>,
+    pub helper: Option<String>,
+    pub bindings: Vec<Binding>,
+    pub helper_content: String,
     #[serde(default)]
     pub priority: i32,
     pub callee: Option<String>,
     pub argument: Option<usize>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Binding {
+    pub name: String,
+    pub ty: String,
+    pub value: String,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -108,6 +119,10 @@ struct InjectionInput {
     content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     content_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    helper: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bindings: Vec<Binding>,
     #[serde(default)]
     priority: i32,
     callee: Option<String>,
@@ -121,12 +136,14 @@ impl From<Injection> for InjectionInput {
             target: i.target,
             parameters: i.parameters,
             kind: i.kind,
-            content: if i.content_file.is_none() {
+            content: if i.content_file.is_none() && i.helper.is_none() {
                 Some(i.content)
             } else {
                 None
             },
             content_file: i.content_file,
+            helper: i.helper,
+            bindings: i.bindings,
             priority: i.priority,
             callee: i.callee,
             argument: i.argument,
@@ -136,11 +153,18 @@ impl From<Injection> for InjectionInput {
 impl TryFrom<InjectionInput> for Injection {
     type Error = String;
     fn try_from(input: InjectionInput) -> Result<Self, Self::Error> {
-        if input.content.is_some() == input.content_file.is_some() {
+        if usize::from(input.content.is_some())
+            + usize::from(input.content_file.is_some())
+            + usize::from(input.helper.is_some())
+            != 1
+        {
             return Err(format!(
-                "injection {}: specify exactly one of content or content_file",
+                "injection {}: specify exactly one of content or content_file or helper",
                 input.id
             ));
+        }
+        if input.helper.is_none() && !input.bindings.is_empty() {
+            return Err(format!("injection {}: bindings require helper", input.id));
         }
         Ok(Self {
             id: input.id,
@@ -150,6 +174,9 @@ impl TryFrom<InjectionInput> for Injection {
             kind: input.kind,
             content: input.content.unwrap_or_default(),
             content_file: input.content_file,
+            helper: input.helper,
+            bindings: input.bindings,
+            helper_content: String::new(),
             priority: input.priority,
             callee: input.callee,
             argument: input.argument,
@@ -157,7 +184,10 @@ impl TryFrom<InjectionInput> for Injection {
     }
 }
 impl Injection {
-    pub fn lower(&self) -> Edit {
+    pub fn lower(&self) -> Result<Edit, String> {
+        if self.helper.is_some() {
+            return Err("helper requires source-aware lowering".into());
+        }
         let body = Target::Body {
             name: self.target.clone(),
             parameters: self.parameters.clone(),
@@ -198,7 +228,7 @@ impl Injection {
             ),
             InjectionKind::Overwrite | InjectionKind::Wrap => (Action::Replace, body, None),
         };
-        Edit {
+        Ok(Edit {
             id: self.id.clone(),
             file: self.file.clone(),
             action,
@@ -206,7 +236,7 @@ impl Injection {
             position,
             content: Some(self.content.clone()),
             priority: self.priority,
-        }
+        })
     }
 }
 #[derive(Debug, Clone, Serialize)]

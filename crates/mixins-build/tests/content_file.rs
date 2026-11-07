@@ -12,13 +12,22 @@ fn real_snapinput_hook_is_inlined_and_not_compiled_separately() {
         fs::read_to_string(repo.join("examples/controls-hook/hooks/ccontrols_snapinput.cpp"))
             .unwrap();
     let plan = mixins_build::plan(&ddnet, &repo.join("examples")).unwrap();
-    let patches = &plan.files[relative].patches;
+    let patches: Vec<_> = plan.files[relative]
+        .patches
+        .iter()
+        .filter(|p| p.mod_id == "controls-hook")
+        .cloned()
+        .collect();
     assert_eq!(patches.len(), 1);
     assert_eq!(patches[0].mod_id, "controls-hook");
     assert_eq!(patches[0].content, snippet);
     let offset = patches[0].span.start;
     assert_eq!(
-        plan.rendered[relative],
+        mixins_transform::Plan {
+            patches: patches.clone()
+        }
+        .render(&before)
+        .unwrap(),
         format!("{}{}{}", &before[..offset], snippet, &before[offset..])
     );
     assert!(!plan.generated_cmake.contains("ccontrols_snapinput.cpp"));

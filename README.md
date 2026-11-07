@@ -88,7 +88,10 @@ content = '''
 Prefer editing C++ outside TOML? Replace `content` with
 `content_file = "hooks/ccontrols_snapinput.cpp"` and put the snippet in your
 mod's `hooks/` directory. It is inserted into the target body, not compiled as a
-separate file. Use exactly one of `content` or `content_file`. See the
+separate file. For a **separate helper function**, use `helper = "hooks/...cpp"`
+with `bindings = [{ name = "controls", ty = "CControls *", value = "this" }]`.
+Choose exactly one of `content`, `content_file` or `helper`. Helpers currently
+support HEAD/TAIL and return void; see [helper semantics](docs/helpers.md). See the
 [file-based hook example](examples/controls-hook) and [path rules](docs/edits.md#injection-content-from-files).
 
 Plan your packages with `ddmix plan --ddnet workspace/ddnet --mods workspace/mods`.
@@ -107,9 +110,10 @@ Dependencies have deterministic ordering; compatibility and dependency version c
 - [Staging, ownership checks, CMake and build recovery](docs/staging.md)
 - [Real-DDNet validation and known gaps](docs/validation.md)
 - [Development roadmap](docs/roadmap.md)
+- [Helper functions and explicit bindings](docs/helpers.md)
 - [Advanced injections and components](docs/advanced-injections.md)
 - [Binary packaging and platform status](docs/distribution.md)
-- [Basic hooks](examples/basic-hooks), [file-based hook](examples/controls-hook), [advanced hooks](examples/advanced-hooks) and [component](examples/component) examples
+- [Basic hooks](examples/basic-hooks), [file-based hook](examples/controls-hook), [helper bindings](examples/controls-helper), [advanced hooks](examples/advanced-hooks) and [component](examples/component) examples
 
 ## Development
 

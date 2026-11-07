@@ -34,7 +34,10 @@ fn file_is_mod_relative_verbatim_and_not_a_compilation_unit() {
     let path = f.manifest("content_file='hooks/nested/snap input.cpp'", "HEAD");
     let m = mixins_manifest::load(&path).unwrap();
     assert_eq!(m.injections[0].content, snippet);
-    assert_eq!(m.injections[0].lower().content.as_deref(), Some(snippet));
+    assert_eq!(
+        m.injections[0].lower().unwrap().content.as_deref(),
+        Some(snippet)
+    );
     let serialized = toml::to_string(&m).unwrap();
     assert!(serialized.contains("content_file ="));
     assert!(!serialized.contains("content ="));

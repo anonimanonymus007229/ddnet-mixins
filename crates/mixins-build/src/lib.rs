@@ -105,7 +105,19 @@ pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
     let mut owners = BTreeMap::new();
     for m in &mods {
         let mut edits = m.manifest.edits.clone();
-        edits.extend(m.manifest.injections.iter().map(|i| i.lower()));
+        for i in &m.manifest.injections {
+            let source = io(fs::read_to_string(safe_file(&ddnet, &i.file)?))?;
+            edits.extend(
+                mixins_transform::helpers::lower(&m.manifest.package.id, i, &source).map_err(
+                    |e| {
+                        format!(
+                            "mod {}, injection {}, file {}: {e}",
+                            m.manifest.package.id, i.id, i.file
+                        )
+                    },
+                )?,
+            );
+        }
         for c in &m.manifest.components {
             edits.extend(components::lower(&ddnet, m, c).map_err(|e| {
                 format!("mod {}, component {}: {e}", m.manifest.package.id, c.class)

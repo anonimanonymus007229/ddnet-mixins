@@ -15,6 +15,8 @@ release with conservative C++ grammar and explicit compatibility limits.
 - Generic INSERT/REPLACE/REMOVE plans, deterministic ordering, conflicts, diff.
 - Injection content inline or from UTF-8 mod-relative hooks/ files, with strict
   containment checks and no separate snippet compilation.
+- HEAD/TAIL static void helpers in the target translation unit, with explicit
+  typed argument bindings, source-scope checks and safe mod-relative helper files.
 - HEAD/TAIL, bounded standalone BEFORE_CALL/AFTER_CALL/MODIFY_ARG, final RETURN,
   body OVERWRITE and explicit-original-block WRAP.
 - Config identifier/console-name conflict checks, exclusive branch awareness.
