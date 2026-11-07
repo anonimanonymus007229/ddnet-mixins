@@ -1,0 +1,28 @@
+name: Rust
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo build --release --locked
+  ddnet-corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ddnet/ddnet
+          ref: 176fc2f9ab85ace703c6ec10da0249b01995ba94
+          path: workspace/ddnet
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p mixins-lexer --test ddnet_corpus --locked -- --ignored --nocapture
