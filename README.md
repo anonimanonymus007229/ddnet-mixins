@@ -1,89 +1,118 @@
 # DDNet Mixins
 
-Rust tooling for independent DDNet mods without editing the upstream checkout.
-**Early implementation:** conservative C++ indexing, generic edit planning,
-isolated staging and CMake source-overlay integration. Full DDNet compilation
-is currently blocked locally by missing dependencies; components are not yet supported.
+Create DDNet mods as separate packages and apply them without editing the original DDNet checkout.
 
-## Build and run
+`ddmix` reads TOML manifests, inserts code into supported C++ functions or around comments, and connects mod-owned client sources to DDNet's CMake target. It prepares a separate working copy for compilation, so mod developers can keep their changes outside upstream source files.
+
+**Early development:** source transformations and isolated application are tested against real DDNet. Full client compilation remains unverified locally because DDNet dependencies are missing. Declarative component registration is not implemented yet.
+
+## Quick start
+
+Requires Rust/Cargo to build `ddmix`. The example below uses the DDNet revision covered by the integration tests; newer revisions may contain unsupported syntax.
 
 ```sh
-cargo build --release
-# Windows: target/release/ddmix.exe; Linux/macOS: target/release/ddmix
-# Copy this native executable onto PATH; Cargo is not needed to run it.
-ddmix --help
-ddmix init mods/my-mod
-ddmix list --workspace ./workspace
-ddmix list --mods ./workspace/mods
-ddmix inspect --ddnet ./workspace/ddnet > corpus.json
-ddmix locate --file ./workspace/ddnet/src/game/client/gameclient.cpp --function CGameClient::OnInit
-ddmix plan --ddnet ./workspace/ddnet --mods ./examples > plan.json
-ddmix check --ddnet ./workspace/ddnet --mods ./examples
-ddmix apply --workspace ./workspace --ddnet ./workspace/ddnet --mods ./examples
-ddmix build --workspace ./workspace --ddnet ./workspace/ddnet --mods ./examples --build-dir ./workspace/build-ddmix
+git clone https://github.com/anonimanonymus007229/ddnet-mixins.git
+cd ddnet-mixins
+cargo build --release --locked
+
+mkdir workspace
+git clone https://github.com/ddnet/ddnet.git workspace/ddnet
+git -C workspace/ddnet checkout 176fc2f9ab85ace703c6ec10da0249b01995ba94
+
+cargo run --release -- plan --ddnet workspace/ddnet --mods examples
 ```
 
-`init` requires an existing parent directory and refuses an existing destination.
-`list`, `inspect`, `locate`, `plan` and `check` are read-only and emit JSON.
-Errors return a nonzero exit status. `inspect` reports structural coverage and
-source-located unsupported regions, **not** complete C++ semantic validity.
+Already have a DDNet checkout? Skip the second clone and pass its path to `--ddnet` instead. The included example plans HEAD/TAIL inserts in `CGameClient::OnInit`, a config declaration, and CMake integration for an external source file. `plan` emits JSON and writes no changes.
 
-## Implemented
+The native executable is `target/release/ddmix.exe` on Windows or `target/release/ddmix` on Linux/macOS. Add it to `PATH` to use the shorter `ddmix` commands below. Running the executable does not require Cargo.
 
-- Native `ddmix` executable with explicit source/workspace paths.
-- Strict TOML package manifests, enabled state, wildcard compatibility and
-  dependencies, stable topological ordering, missing dependency/cycle checks.
-- Sorted recursive `.cpp`/`.h` overlay discovery. Other extensions are ignored.
-  Only `src/game/client/** -> game-client` is supported; unknown ownership fails.
-- Inputs under a discovered mod/source tree may not be symlinks. Explicit roots
-  are canonicalized. The original DDNet checkout is never modified.
-- Project-owned C++ lexer: exact byte spans and line/column positions, trivia,
-  comments, prefixed/escaped/raw literals, numbers, operators, continued
-  directives, conditional nesting validation.
-- Branch-aware structural delimiter maps, conservative qualified function/class
-  definitions, exact body boundaries and overload-aware lookup.
-- Generic INSERT/REPLACE/REMOVE planner, function/comment targets, restricted
-  class-body inserts, conflict checks and deterministic same-offset ordering.
-- HEAD/TAIL aliases lower to generic edits. See [edit semantics](docs/edits.md).
-- Fresh staged copies under `.ddmix/staging/ddnet`, SHA-256 ownership inventory,
-  repeated-apply stability and protection against overwriting manual changes.
-- Own CMake command/block scanner places a managed include after platform target
-  creation; external mod sources/includes are attached to `game-client`.
-- `CHECKSUM_SRC` additions outside DEV and an actual checksum-array capacity guard.
-- `build` applies, configures and builds the staged client. See
-  [staging/build workflow](docs/staging.md) for safeguards and current limitations.
+## Usage
 
-Example `mixin.toml`:
+Check the example, then apply it to a separate working copy:
+
+```sh
+ddmix check --ddnet workspace/ddnet --mods examples
+ddmix apply --workspace workspace --ddnet workspace/ddnet --mods examples
+```
+
+The result lives in `workspace/.ddmix/staging/ddnet/`. **Staging means the generated DDNet copy with mods applied**, not a directory to edit manually. The original `workspace/ddnet/` stays unchanged, and mod source files remain in their own directories.
+
+Each `apply` starts from the original checkout, preventing duplicate inserts. If generated files have been changed manually, `ddmix` refuses to overwrite them.
+
+With DDNet's compiler, CMake and third-party dependencies installed, configure and build that copy:
+
+```sh
+ddmix build --workspace workspace --ddnet workspace/ddnet --mods examples --build-dir workspace/build-ddmix
+```
+
+`build` runs `apply` first, then CMake configuration and the `game-client` build. It does not install dependencies. Extra cache settings use `--cmake-arg=-DNAME=VALUE`; keep build output outside `.ddmix` and the original checkout. See the [staging and build guide](docs/staging.md).
+
+To locate a function without changing it:
+
+```sh
+ddmix locate --file workspace/ddnet/src/game/client/gameclient.cpp --function CGameClient::OnInit
+```
+
+Use `ddmix --help` or `ddmix <command> --help` for command options.
+
+## Mod configuration
+
+Create a package under an existing parent directory:
+
+```sh
+mkdir workspace/mods
+ddmix init workspace/mods/my-mod
+```
+
+Add an injection to `workspace/mods/my-mod/mixin.toml`:
 
 ```toml
 [mod]
 id = "my-mod"
 name = "My mod"
 version = "0.1.0"
-enabled = true
 
-[compatibility]
-ddnet = "*"
+[[injections]]
+id = "init-head"
+file = "src/game/client/gameclient.cpp"
+target = "CGameClient::OnInit"
+parameters = "()"
+kind = "HEAD"
+content = '''
 
-[dependencies]
-# other-mod = "*"
+	// My initialization hook.
+'''
 ```
 
-Only `*` version constraints are currently accepted. Unknown manifest fields
-(including unimplemented components) fail rather than being silently ignored.
-Edits and HEAD/TAIL injections support planning and staged application; see
-`examples/basic-hooks/mixin.toml`. Mod sources remain in their own `src/` trees.
+Plan your packages with `ddmix plan --ddnet workspace/ddnet --mods workspace/mods`.
 
-## Validation
+Place new `.cpp` and `.h` files under `workspace/mods/my-mod/src/game/client/…`, mirroring DDNet paths. They are discovered automatically and attached to `game-client` without copying them into DDNet's source tree. Other target mappings are not supported yet; overlays cannot replace existing upstream files.
+
+HEAD inserts at the beginning of a function body. TAIL inserts at its lexical end, **not before every return**. Generic edits support INSERT, REPLACE and REMOVE with documented target restrictions. Ambiguous matches and overlapping edits fail instead of choosing a location.
+
+Dependencies have deterministic ordering; compatibility and dependency version constraints currently accept only `*`. The parser covers a subset of C++ and explicitly reports unsupported regions. `check` validates selectors, conflicts and structural CMake placement—it does not run a compiler or validate snippet semantics.
+
+## Documentation
+
+- [Edit syntax, selectors and limitations](docs/edits.md)
+- [Staging, ownership checks, CMake and build recovery](docs/staging.md)
+- [Real-DDNet validation and known gaps](docs/validation.md)
+- [Development roadmap](docs/roadmap.md)
+- [Complete example package](examples/basic-hooks)
+
+## Development
+
+Rust/Cargo, CMake and a C++ compiler are needed for the regular test suite. The explicit corpus tests also require a real DDNet checkout at `workspace/ddnet`, or at the path set by `DDMIX_TEST_DDNET`.
 
 ```sh
-cargo test --workspace
-cargo test --workspace -- --ignored --nocapture
-cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --locked -- --ignored --nocapture
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-The explicitly invoked integration test uses `workspace/ddnet` by default, or
-`DDMIX_TEST_DDNET` for a different real checkout. It fails if that corpus is
-missing; ordinary tests do not require an upstream download, but CMake is required
-along with a C++ compiler for the generated-target-properties integration test. See
-[validation](docs/validation.md) and [roadmap](docs/roadmap.md).
+Parser changes should be checked against real DDNet files, not only synthetic examples. C++ lexing, parsing and transformation are implemented in this repository rather than delegated to an existing C++ parser.
+
+## License
+
+[MIT](LICENSE).
