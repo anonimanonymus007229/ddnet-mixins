@@ -11,6 +11,14 @@ to a directory on PATH. Running ddmix does not require Cargo; building DDNet sti
 requires its own toolchain and dependencies. On Unix, preserve executable
 permissions when extracting an archive, or run `chmod +x ddmix`.
 
+## CI artifacts
+
+Open a successful **Rust** workflow run in GitHub Actions and download the
+`ddmix-<target>` artifact for Windows x86_64, Linux x86_64 or macOS ARM64.
+Each artifact contains a ZIP with the ddmix executable, README and license,
+plus a SHA-256 checksum file. Extract the executable and add it to PATH.
+The DDNet integration build does not publish a client artifact.
+
 ## Packaging for maintainers
 
 Package an already-built executable with its README, MIT license and archive

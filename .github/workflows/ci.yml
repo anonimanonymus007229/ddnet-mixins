@@ -4,17 +4,35 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: ddmix
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: ddmix.exe
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: ddmix
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: ${{ matrix.target }}
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo build --release --locked
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package ddmix executable
+        run: python scripts/package.py --binary target/${{ matrix.target }}/release/${{ matrix.binary }} --target ${{ matrix.target }} --out dist
+      - name: Upload ddmix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddmix-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
   ddnet-corpus:
     runs-on: ubuntu-latest
     steps:
@@ -44,7 +62,3 @@ jobs:
       - name: Test dependency symlink materialization on Windows
         run: cargo test -p mixins-build --test dependency_links --locked -- --nocapture
       - run: cargo run --release --locked -- build --workspace workspace --ddnet workspace/ddnet --mods examples --libraries workspace/dependencies/ddnet-libs --build-dir workspace/build-ddmix --cmake-arg=-DVIDEORECORDER=OFF --cmake-arg=-DVULKAN=OFF --cmake-arg=-DSERVER=OFF --cmake-arg=-DTOOLS=OFF --cmake-arg=-DDOWNLOAD_GTEST=OFF --cmake-arg=-DPREFER_BUNDLED_LIBS=ON
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ddnet-example-client-windows
-          path: workspace/build-ddmix/Release/DDNet.exe
