@@ -56,6 +56,13 @@ ddmix locate --file workspace/ddnet/src/game/client/gameclient.cpp --function CG
 
 Use `ddmix --help` or `ddmix <command> --help` for command options.
 
+Logs show the banner/version, processing stages, progress, elapsed time and a
+final summary on **stderr**, keeping JSON/diff stdout clean. Use `--quiet` to
+suppress routine output, `--verbose` for individual transformations and source
+locations, or `--color=never` for plain logs. Warnings/errors remain visible in
+quiet mode. Build transcripts are saved in the build directory. See
+[logging and progress](docs/logging.md).
+
 ## Mod configuration
 
 Create a package under an existing parent directory:
@@ -110,6 +117,7 @@ Dependencies have deterministic ordering; compatibility and dependency version c
 - [Staging, ownership checks, CMake and build recovery](docs/staging.md)
 - [Real-DDNet validation and known gaps](docs/validation.md)
 - [Development roadmap](docs/roadmap.md)
+- [CLI logging and build progress](docs/logging.md)
 - [Helper functions and explicit bindings](docs/helpers.md)
 - [Advanced injections and components](docs/advanced-injections.md)
 - [Binary packaging and platform status](docs/distribution.md)

@@ -35,7 +35,7 @@ without choosing any branch active.
 ## Executed locally (Windows, Rust 1.99.1)
 
 - `cargo test --workspace`: lexer, manifest, parser, transform and CLI tests.
-- `cargo test --workspace -- --ignored --nocapture`: eleven explicit real-DDNet
+- `cargo test --workspace -- --ignored --nocapture`: twelve explicit real-DDNet
   integration tests passed (lexer scan, parser scan, real selector/body tests,
   HEAD/TAIL/config rendering, real CMake anchors, repeated real-DDNet staging).
 - Real `CGameClient::OnInit`, `OnRender` and `OnConsoleInit` resolved with exact
@@ -107,11 +107,31 @@ target scopes, plus multiple helpers with collision-free names.
 A separate CMake runtime probe compiles and executes HEAD/TAIL helpers: int&
 forwarding mutates original state and bare helper return does not exit the target.
 
-The regular suite has 35 passing tests; explicit corpus tests cover config
+The regular suite has 41 passing tests; explicit corpus tests cover config
 collisions, real component lowering/diff and real advanced selectors in addition
 to earlier scans/staging. Release packaging workflow covers Windows x86_64,
 Linux x86_64, macOS Intel/ARM64 but has not been run remotely. A local Windows
 archive is generated under target/dist. No public tag/release is published.
+
+Logging validation covers banner/version, stage numbers, summary counters,
+quiet/verbose equivalence of JSON, forced/disabled color, NO_COLOR, explicit
+skips, contextual errors and a quiet failed-configure transcript/tail. A separate
+C++ target compiles successfully through the CLI and checks all nine build stages,
+compiler warning visibility in quiet, empty stdout and full log files. Real-DDNet
+observer events do not alter the serialized plan.
+
+A fresh real-DDNet build with logging reached compilation but MSVC failed with
+C1076/C3859 memory exhaustion. Failure diagnostics, active compile stage, complete
+transcript path, counts and elapsed time were verified in
+`target/reports/logging-build.stderr`. An initial parallelism-limited retry exposed
+Git Bash environment-path conversion of CL=/MP1 and also reported a contextual
+failure (`logging-build-retry.stderr`). This is a resource/environment failure,
+not a newly claimed successful full-client build; earlier successful client
+builds above remain the verified baseline. Native recovery passed CL=/MP1 via Python without shell conversion and
+successfully linked game-client (`target/reports/logging-native-recovery.log`).
+This confirms the staged source still builds under reduced compiler parallelism;
+the successful nine-stage CLI log path is covered separately by the compiled
+fixture. Cross-platform terminal/CI behavior remains pending remote execution. See [logging](logging.md).
 
 Remaining: no complete C++ semantic AST, macro expansion, arbitrary nested call
 rewrites or complex return control-flow transformation. Advanced aliases have

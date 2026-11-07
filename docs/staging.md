@@ -68,7 +68,10 @@ out-of-bounds C++. Unsupported checksum layouts fail planning.
 ## Build and environment
 
 Build outputs go into an explicit directory outside `.ddmix` and original DDNet.
-CMake may write arbitrary outputs there; use a dedicated directory. Only extra
+CMake may write arbitrary outputs there; use a dedicated directory.
+The CLI streams native output to stderr and saves `ddmix-configure.log` and
+`ddmix-build.log` in this directory, including when quiet mode is selected.
+See [logging](logging.md) for verbosity, error tails and summary counts. Only extra
 `-DNAME=VALUE` cache settings are accepted. Reserved workspace overrides and
 alternate source/binary/script modes are rejected. Default generator discovery
 is used. `build` always configures then builds target game-client, Release for

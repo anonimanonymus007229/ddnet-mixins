@@ -209,6 +209,7 @@ name = "mixins-build"
 version = "0.1.0"
 dependencies = [
  "mixins-cmake",
+ "mixins-core",
  "mixins-lexer",
  "mixins-manifest",
  "mixins-parser",

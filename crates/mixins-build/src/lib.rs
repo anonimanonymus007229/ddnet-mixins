@@ -1,5 +1,6 @@
 //! Read-only planning and isolated, tool-owned staging publication.
 mod components;
+use mixins_core::progress::{Event, Observer};
 use mixins_transform::{Edit, Plan};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -98,14 +99,65 @@ pub struct IntegrationPlan {
     pub rendered: BTreeMap<String, String>,
 }
 pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
+    plan_observed(ddnet, mods_root, &mut |_| {})
+}
+pub fn plan_observed(
+    ddnet: &Path,
+    mods_root: &Path,
+    observe: &mut Observer<'_>,
+) -> Result<IntegrationPlan> {
+    observe(Event::Stage {
+        name: "discovery",
+        message: format!("Loading mods from {}", mods_root.display()),
+    });
     let ddnet = io(ddnet.canonicalize())?;
-    let mods = mixins_manifest::discover(mods_root)?;
+    let mods = mixins_manifest::discover_observed(mods_root, observe)?;
+    observe(Event::Count {
+        name: "mods",
+        value: mods.len(),
+    });
+    if mods.is_empty() {
+        observe(Event::Warning(
+            "No enabled mods discovered; only managed CMake integration will be prepared".into(),
+        ));
+    }
+    observe(Event::Count {
+        name: "manifest edits",
+        value: mods.iter().map(|m| m.manifest.edits.len()).sum(),
+    });
+    observe(Event::Count {
+        name: "injections",
+        value: mods.iter().map(|m| m.manifest.injections.len()).sum(),
+    });
+    observe(Event::Count {
+        name: "components",
+        value: mods.iter().map(|m| m.manifest.components.len()).sum(),
+    });
+    observe(Event::Count {
+        name: "overlay files",
+        value: mods.iter().map(|m| m.files.len()).sum(),
+    });
+    observe(Event::Detail(format!(
+        "Dependency order: {}",
+        mods.iter()
+            .map(|m| m.manifest.package.id.as_str())
+            .collect::<Vec<_>>()
+            .join(" -> ")
+    )));
+    observe(Event::Stage {
+        name: "lowering",
+        message: "Lowering injections and component registrations to generic edits".into(),
+    });
     let mut grouped: BTreeMap<String, Vec<(String, Edit)>> = BTreeMap::new();
     let (mut overlays, mut includes) = (Vec::new(), Vec::new());
     let mut owners = BTreeMap::new();
     for m in &mods {
         let mut edits = m.manifest.edits.clone();
         for i in &m.manifest.injections {
+            observe(Event::Detail(format!(
+                "mod {} injection {}: {:?} {} in {} (helper {:?}, content_file {:?})",
+                m.manifest.package.id, i.id, i.kind, i.target, i.file, i.helper, i.content_file
+            )));
             let source = io(fs::read_to_string(safe_file(&ddnet, &i.file)?))?;
             edits.extend(
                 mixins_transform::helpers::lower(&m.manifest.package.id, i, &source).map_err(
@@ -119,6 +171,10 @@ pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
             );
         }
         for c in &m.manifest.components {
+            observe(Event::Info(format!(
+                "mod {}: register {} as {} in {:?}",
+                m.manifest.package.id, c.class, c.member, c.register_in
+            )));
             edits.extend(components::lower(&ddnet, m, c).map_err(|e| {
                 format!("mod {}, component {}: {e}", m.manifest.package.id, c.class)
             })?);
@@ -144,6 +200,13 @@ pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
             if ddnet.join(&f.logical).exists() {
                 return Err(format!("overlay shadows upstream source: {}", f.logical));
             }
+            observe(Event::Detail(format!(
+                "mod {} overlay {} -> {} ({})",
+                m.manifest.package.id,
+                f.logical,
+                f.target,
+                f.physical.display()
+            )));
             overlays.push(cmake_path(&f.physical)?);
         }
     }
@@ -158,11 +221,68 @@ pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
         cmake_configure_validated: false,
         compile_validated: false,
     };
-    for (file, edits) in grouped {
+    observe(Event::Stage {
+        name: "resolve",
+        message: format!("Indexing and transforming {} source files", grouped.len()),
+    });
+    let file_count = grouped.len();
+    let mut patch_count = 0;
+    for (n, (file, edits)) in grouped.into_iter().enumerate() {
         let source = io(fs::read_to_string(safe_file(&ddnet, &file)?))?;
+        let index = mixins_parser::parse(&source, &mixins_lexer::lex(&source));
+        observe(Event::Detail(format!(
+            "{file}: index contains {} functions, {} declarations, {} classes",
+            index.functions.len(),
+            index.declarations.len(),
+            index.classes.len()
+        )));
+        if !index.unsupported.is_empty() {
+            observe(Event::Warning(format!(
+                "{file}: {} unsupported syntax regions outside resolved targets; see inspect JSON/--verbose for parser coverage",
+                index.unsupported.len()
+            )));
+        }
+        for d in &index.unsupported {
+            observe(Event::Detail(format!(
+                "{file}:{}:{} [{}] {}",
+                d.line, d.column, d.code, d.message
+            )));
+        }
         let refs: Vec<_> = edits.iter().map(|(id, e)| (id.as_str(), e)).collect();
         let plan = Plan::resolve(&source, &refs)?;
         let rendered = plan.render(&source)?;
+        patch_count += plan.patches.len();
+        observe(Event::Info(format!(
+            "{file}: resolved {} syntax edits",
+            plan.patches.len()
+        )));
+        for p in &plan.patches {
+            let line = source[..p.span.start]
+                .bytes()
+                .filter(|b| *b == b'\n')
+                .count()
+                + 1;
+            let column = source[..p.span.start]
+                .rsplit('\n')
+                .next()
+                .unwrap_or("")
+                .chars()
+                .count()
+                + 1;
+            observe(Event::Detail(format!(
+                "{}/{} at {file}:{line}:{column}, bytes {}..{}, {} content bytes",
+                p.mod_id,
+                p.edit_id,
+                p.span.start,
+                p.span.end,
+                p.content.len()
+            )));
+        }
+        observe(Event::Progress {
+            name: "resolve",
+            done: n + 1,
+            total: file_count,
+        });
         if file == "src/engine/shared/config_variables.h" {
             validate_config(&rendered)?;
         }
@@ -172,6 +292,18 @@ pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
             .insert(file.clone(), hash(source.as_bytes()));
         result.files.insert(file, plan);
     }
+    observe(Event::Count {
+        name: "patches",
+        value: patch_count,
+    });
+    observe(Event::Count {
+        name: "modified files",
+        value: file_count + 1,
+    });
+    observe(Event::Stage {
+        name: "cmake",
+        message: "Validating target placement, overlay mapping and checksum capacity".into(),
+    });
     let cmake = io(fs::read_to_string(ddnet.join("CMakeLists.txt")))?;
     let capacity = mixins_cmake::checksum_capacity(&io(fs::read_to_string(safe_file(
         &ddnet,
@@ -198,6 +330,12 @@ pub fn plan(ddnet: &Path, mods_root: &Path) -> Result<IntegrationPlan> {
             }
         }
     }
+    observe(Event::Success(format!(
+        "Plan validated: {patch_count} source patches; staged CMake integration ready"
+    )));
+    observe(Event::Detail(
+        "CMake configure and C++ compilation have not been run by the planner".into(),
+    ));
     Ok(result)
 }
 impl IntegrationPlan {
@@ -335,6 +473,19 @@ pub fn apply_with_dependencies(
     mods: &Path,
     libraries: Option<&Path>,
 ) -> Result<PathBuf> {
+    apply_observed(workspace, ddnet, mods, libraries, &mut |_| {})
+}
+pub fn apply_observed(
+    workspace: &Path,
+    ddnet: &Path,
+    mods: &Path,
+    libraries: Option<&Path>,
+    observe: &mut Observer<'_>,
+) -> Result<PathBuf> {
+    observe(Event::Stage {
+        name: "prepare",
+        message: "Validating workspace paths and dependency tree before staging".into(),
+    });
     let libraries = libraries.map(|p| io(p.canonicalize())).transpose()?;
     let dependency_files = libraries
         .as_ref()
@@ -380,15 +531,33 @@ pub fn apply_with_dependencies(
         );
     }
     if output.try_exists().map_err(|e| e.to_string())? {
+        observe(Event::Info(
+            "Verifying existing .ddmix ownership and SHA-256 inventory".into(),
+        ));
         validate_owned(&output)?;
     }
-    let plan = plan(&ddnet, &mods)?;
+    let plan = plan_observed(&ddnet, &mods, observe)?;
+    observe(Event::Stage {
+        name: "staging",
+        message: "Copying pristine DDNet into an isolated transaction".into(),
+    });
     let inputs = regular_tree(&ddnet, true)?; // validate entire copy before creating output
+    if ddnet.join(".git").exists() {
+        observe(Event::Info(
+            "Excluding root .git metadata from the isolated copy".into(),
+        ));
+    }
     io(fs::create_dir(&transaction))?;
     // Failed prepublication outputs remain named .ddmix-next for inspection.
     let staged = transaction.join("staging/ddnet");
     io(fs::create_dir_all(&staged))?;
-    for relative in inputs {
+    let total = inputs.len();
+    observe(Event::Count {
+        name: "copied source files",
+        value: total,
+    });
+    for (n, relative) in inputs.into_iter().enumerate() {
+        observe(Event::Detail(format!("Copy {}", relative.display())));
         let dest = staged.join(&relative);
         io(fs::create_dir_all(
             dest.parent().ok_or("missing destination parent")?,
@@ -411,6 +580,13 @@ pub fn apply_with_dependencies(
             &dest,
             io(fs::metadata(ddnet.join(relative)))?.permissions(),
         ))?;
+        if (n + 1) % 100 == 0 || n + 1 == total {
+            observe(Event::Progress {
+                name: "staging",
+                done: n + 1,
+                total,
+            });
+        }
     }
     if let (Some(libs), Some(files)) = (&libraries, dependency_files) {
         let destination = staged.join("ddnet-libs");
@@ -419,13 +595,33 @@ pub fn apply_with_dependencies(
                 "DDNet already contains bundled dependencies; refusing external override".into(),
             );
         }
-        for relative in files {
+        let total = files.len();
+        observe(Event::Count {
+            name: "dependency files",
+            value: total,
+        });
+        observe(Event::Info(format!(
+            "Copying {total} bundled dependency files"
+        )));
+        for (n, relative) in files.into_iter().enumerate() {
             let path = destination.join(&relative);
             io(fs::create_dir_all(
                 path.parent().ok_or("dependency parent missing")?,
             ))?;
             io(fs::copy(libs.join(relative), path))?;
+            if (n + 1) % 100 == 0 || n + 1 == total {
+                observe(Event::Progress {
+                    name: "dependencies",
+                    done: n + 1,
+                    total,
+                });
+            }
         }
+    } else {
+        observe(Event::Detail(
+            "No external libraries supplied; retaining dependencies present in original DDNet"
+                .into(),
+        ));
     }
     for (relative, content) in &plan.rendered {
         io(fs::write(staged.join(relative), content))?;
@@ -438,6 +634,10 @@ pub fn apply_with_dependencies(
         transaction.join("plan.json"),
         serde_json::to_vec_pretty(&plan).map_err(|e| e.to_string())?,
     ))?;
+    observe(Event::Stage {
+        name: "publish",
+        message: "Writing generated state and publishing verified staging".into(),
+    });
     let state = State {
         owner: "ddnet-mixins".into(),
         version: 1,
@@ -461,5 +661,9 @@ pub fn apply_with_dependencies(
     if had_previous {
         io(fs::remove_dir_all(previous))?;
     }
+    observe(Event::Success(format!(
+        "Staging ready: {}",
+        output.join("staging/ddnet").display()
+    )));
     Ok(output.join("staging/ddnet"))
 }

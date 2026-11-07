@@ -1,4 +1,5 @@
 //! Shared diagnostics and deterministic, symlink-rejecting file discovery.
+pub mod progress;
 use serde::Serialize;
 use std::{
     fs, io,

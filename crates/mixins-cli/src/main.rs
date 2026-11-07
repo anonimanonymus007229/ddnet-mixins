@@ -1,4 +1,7 @@
+mod logging;
 use clap::{Parser, Subcommand};
+use logging::{Color, Logger};
+use mixins_core::progress::Event;
 use serde::Serialize;
 use std::{
     fs,
@@ -13,6 +16,14 @@ use std::{
     about = "DDNet Mixins: deterministic mod discovery and custom C++ lexical inspection"
 )]
 struct Cli {
+    /// Suppress banner, progress and success summaries (warnings/errors remain).
+    #[arg(short, long, global = true, conflicts_with = "verbose")]
+    quiet: bool,
+    /// Show transformations, locations and stage timings.
+    #[arg(short, long, global = true)]
+    verbose: bool,
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    color: Color,
     #[command(subcommand)]
     command: Commands,
 }
@@ -116,9 +127,46 @@ struct Report {
     diagnostic_count: usize,
     files: Vec<FileReport>,
 }
-fn run(cli: Cli) -> Result<bool, String> {
+impl Commands {
+    fn stages(&self) -> Vec<&'static str> {
+        match self {
+            Self::Init { .. } => vec!["init"],
+            Self::List { .. } => vec!["discovery"],
+            Self::Locate { .. } => vec!["index", "locate"],
+            Self::Inspect { .. } => vec!["discovery", "index"],
+            Self::Plan { .. } | Self::Check { .. } => {
+                vec!["discovery", "lowering", "resolve", "cmake"]
+            }
+            Self::Apply { .. } => vec![
+                "prepare",
+                "discovery",
+                "lowering",
+                "resolve",
+                "cmake",
+                "staging",
+                "publish",
+            ],
+            Self::Build { .. } => vec![
+                "prepare",
+                "discovery",
+                "lowering",
+                "resolve",
+                "cmake",
+                "staging",
+                "publish",
+                "configure",
+                "compile",
+            ],
+        }
+    }
+}
+fn run(cli: Cli, log: &mut Logger) -> Result<bool, String> {
     match cli.command {
         Commands::Init { path } => {
+            log.event(Event::Stage {
+                name: "init",
+                message: format!("Creating mod {}", path.display()),
+            });
             let id = path
                 .file_name()
                 .and_then(|s| s.to_str())
@@ -133,10 +181,26 @@ fn run(cli: Cli) -> Result<bool, String> {
             fs::create_dir(path.join("src")).map_err(|e| e.to_string())?;
             fs::write(path.join("mixin.toml"), format!("[mod]\nid = \"{id}\"\nname = \"{id}\"\nversion = \"0.1.0\"\n\n[compatibility]\nddnet = \"*\"\n")).map_err(|e| e.to_string())?;
             println!("Created {}", path.display());
+            log.event(Event::Success(format!("Created {}", path.display())));
             Ok(true)
         }
         Commands::List { workspace, mods } => {
-            let mods = mixins_manifest::discover(&mods.unwrap_or_else(|| workspace.join("mods")))?;
+            log.event(Event::Stage {
+                name: "discovery",
+                message: "Discovering and ordering mod packages".into(),
+            });
+            let mods = mixins_manifest::discover_observed(
+                &mods.unwrap_or_else(|| workspace.join("mods")),
+                &mut |e| log.event(e),
+            )?;
+            log.event(Event::Count {
+                name: "mods",
+                value: mods.len(),
+            });
+            log.event(Event::Count {
+                name: "overlay files",
+                value: mods.iter().map(|m| m.files.len()).sum(),
+            });
             println!(
                 "{}",
                 serde_json::to_string_pretty(&mods).map_err(|e| e.to_string())?
@@ -148,7 +212,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             mods,
             diff: true,
         } => {
-            let plan = mixins_build::plan(&ddnet, &mods)?;
+            let plan = mixins_build::plan_observed(&ddnet, &mods, &mut |e| log.event(e))?;
             print!("{}", plan.diff(&ddnet)?);
             Ok(true)
         }
@@ -158,7 +222,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             diff: false,
         }
         | Commands::Check { ddnet, mods } => {
-            let plan = mixins_build::plan(&ddnet, &mods)?;
+            let plan = mixins_build::plan_observed(&ddnet, &mods, &mut |e| log.event(e))?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&plan).map_err(|e| e.to_string())?
@@ -170,7 +234,9 @@ fn run(cli: Cli) -> Result<bool, String> {
             ddnet,
             mods,
         } => {
-            let staged = mixins_build::apply(&workspace, &ddnet, &mods)?;
+            let staged = mixins_build::apply_observed(&workspace, &ddnet, &mods, None, &mut |e| {
+                log.event(e)
+            })?;
             println!("{}", serde_json::json!({ "staged_ddnet": staged }));
             Ok(true)
         }
@@ -209,13 +275,20 @@ fn run(cli: Cli) -> Result<bool, String> {
             }) {
                 return Err("unsafe/reserved CMake argument".into());
             }
-            let staged = mixins_build::apply_with_dependencies(
+            let staged = mixins_build::apply_observed(
                 &workspace,
                 &ddnet,
                 &mods,
                 libraries.as_deref(),
+                &mut |e| log.event(e),
             )?;
-            let status = Command::new("cmake")
+            log.event(Event::Stage {
+                name: "configure",
+                message: format!("Configuring staged DDNet in {}", build_dir.display()),
+            });
+            fs::create_dir_all(&build_dir).map_err(|e| format!("{}: {e}", build_dir.display()))?;
+            let mut configure = Command::new("cmake");
+            configure
                 .arg("-S")
                 .arg(mixins_build::cmake_path(&staged)?)
                 .arg("-B")
@@ -230,13 +303,15 @@ fn run(cli: Cli) -> Result<bool, String> {
                 .arg(format!(
                     "-DDDMIX_WORKSPACE_ROOT={}",
                     mixins_build::cmake_path(&workspace)?
-                ))
-                .status()
-                .map_err(|e| format!("cannot run cmake: {e}"))?;
-            if !status.success() {
-                return Err(format!("CMake configure failed: {status}"));
-            }
-            let status = Command::new("cmake")
+                ));
+            log.command(&mut configure, &build_dir.join("ddmix-configure.log"))?;
+            log.event(Event::Success("CMake configure succeeded".into()));
+            log.event(Event::Stage {
+                name: "compile",
+                message: "Building game-client (Release)".into(),
+            });
+            let mut build = Command::new("cmake");
+            build
                 .arg("--build")
                 .arg(mixins_build::cmake_path(&build_dir)?)
                 .args(["--target", "game-client", "--config", "Release"])
@@ -244,12 +319,15 @@ fn run(cli: Cli) -> Result<bool, String> {
                 .env(
                     "GIT_CEILING_DIRECTORIES",
                     mixins_build::cmake_path(&workspace.join(".ddmix/staging"))?,
-                )
-                .status()
-                .map_err(|e| format!("cannot run cmake build: {e}"))?;
-            if !status.success() {
-                return Err(format!("CMake build failed: {status}"));
+                );
+            if log.is_verbose() {
+                build.arg("--verbose");
             }
+            log.command(&mut build, &build_dir.join("ddmix-build.log"))?;
+            log.event(Event::Success(format!(
+                "game-client compiled successfully; build output: {}",
+                build_dir.display()
+            )));
             Ok(true)
         }
         Commands::Locate {
@@ -257,9 +335,17 @@ fn run(cli: Cli) -> Result<bool, String> {
             function,
             parameters,
         } => {
+            log.event(Event::Stage {
+                name: "index",
+                message: format!("Indexing {}", file.display()),
+            });
             let source =
                 fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
             let index = mixins_parser::parse(&source, &mixins_lexer::lex(&source));
+            log.event(Event::Stage {
+                name: "locate",
+                message: format!("Resolving {function}"),
+            });
             let node = index
                 .select_function(&function, parameters.as_deref(), &source)
                 .map_err(|e| format!("{}: {e}", file.display()))?;
@@ -267,9 +353,21 @@ fn run(cli: Cli) -> Result<bool, String> {
                 "{}",
                 serde_json::to_string_pretty(node).map_err(|e| e.to_string())?
             );
+            log.event(Event::Success(format!(
+                "{}:{}: {} body bytes {}..{}",
+                file.display(),
+                node.line,
+                node.qualified_name,
+                node.body.start,
+                node.body.end
+            )));
             Ok(true)
         }
         Commands::Inspect { ddnet } => {
+            log.event(Event::Stage {
+                name: "discovery",
+                message: format!("Discovering DDNet corpus {}", ddnet.display()),
+            });
             let ddnet = ddnet
                 .canonicalize()
                 .map_err(|e| format!("{}: {e}", ddnet.display()))?;
@@ -299,7 +397,13 @@ fn run(cli: Cli) -> Result<bool, String> {
                 diagnostic_count: 0,
                 files: Vec::new(),
             };
-            for file in mixins_core::source_files(&ddnet.join("src")).map_err(|e| e.to_string())? {
+            let files = mixins_core::source_files(&ddnet.join("src")).map_err(|e| e.to_string())?;
+            let total = files.len();
+            log.event(Event::Stage {
+                name: "index",
+                message: format!("Lexing and structurally indexing {total} files"),
+            });
+            for (n, file) in files.into_iter().enumerate() {
                 let source =
                     fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
                 let lexed = mixins_lexer::lex(&source);
@@ -312,6 +416,40 @@ fn run(cli: Cli) -> Result<bool, String> {
                 report.functions += index.functions.len();
                 report.classes += index.classes.len();
                 report.unsupported_regions += index.unsupported.len();
+                log.event(Event::Detail(format!(
+                    "{}: {} functions, {} classes, {} unsupported regions",
+                    file.display(),
+                    index.functions.len(),
+                    index.classes.len(),
+                    index.unsupported.len()
+                )));
+                for d in &index.diagnostics {
+                    log.event(Event::Warning(format!(
+                        "{}:{}:{} [{}] {}",
+                        file.display(),
+                        d.line,
+                        d.column,
+                        d.code,
+                        d.message
+                    )));
+                }
+                for d in &index.unsupported {
+                    log.event(Event::Detail(format!(
+                        "Unsupported {}:{}:{} [{}] {}",
+                        file.display(),
+                        d.line,
+                        d.column,
+                        d.code,
+                        d.message
+                    )));
+                }
+                if (n + 1) % 25 == 0 || n + 1 == total {
+                    log.event(Event::Progress {
+                        name: "index",
+                        done: n + 1,
+                        total,
+                    });
+                }
                 report.files.push(FileReport {
                     file: file
                         .strip_prefix(&ddnet)
@@ -331,6 +469,26 @@ fn run(cli: Cli) -> Result<bool, String> {
             }
             report.files_scanned = report.files.len();
             let success = report.diagnostic_count == 0;
+            for (name, value) in [
+                ("indexed files", report.files_scanned),
+                ("functions", report.functions),
+                ("classes", report.classes),
+                ("tokens", report.tokens),
+            ] {
+                log.event(Event::Count { name, value });
+            }
+            if report.unsupported_regions > 0 {
+                log.event(Event::Warning(format!(
+                    "{} unsupported syntax regions remain; see JSON inventory or --verbose",
+                    report.unsupported_regions
+                )));
+            }
+            if !success {
+                log.error(&format!(
+                    "{} corpus diagnostics; review file locations above and JSON report",
+                    report.diagnostic_count
+                ));
+            }
             println!(
                 "{}",
                 serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
@@ -340,11 +498,21 @@ fn run(cli: Cli) -> Result<bool, String> {
     }
 }
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
-        Ok(true) => ExitCode::SUCCESS,
-        Ok(false) => ExitCode::FAILURE,
+    let cli = Cli::parse();
+    let mut log = Logger::new(cli.command.stages(), cli.quiet, cli.verbose, cli.color);
+    log.banner();
+    match run(cli, &mut log) {
+        Ok(success) => {
+            log.finish(success);
+            if success {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
         Err(message) => {
-            eprintln!("{}", serde_json::json!({ "error": message }));
+            log.error(&message);
+            log.finish(false);
             ExitCode::FAILURE
         }
     }

@@ -25,6 +25,8 @@ release with conservative C++ grammar and explicit compatibility limits.
 - Component include/member/all/input registration lowering to generic edits.
 - Real Windows Release client compile with all example mods and pinned libs.
 - Local Windows executable/ZIP/checksum; multi-platform release workflow.
+- Observer-based CLI logging with banner/version, stage/count progress, elapsed
+  timings, quiet/verbose/color modes, compiler transcripts and failure summaries.
 
 ## Not universal or release-validated yet
 

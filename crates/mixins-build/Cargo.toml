@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+mixins-core.workspace = true
 mixins-manifest.workspace = true
 mixins-transform.workspace = true
 mixins-cmake.workspace = true

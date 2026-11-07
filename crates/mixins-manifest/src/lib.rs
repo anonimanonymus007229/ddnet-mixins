@@ -231,6 +231,13 @@ fn read_hook(manifest: &Path, relative: &str) -> Result<String, String> {
 }
 
 pub fn discover(root: &Path) -> Result<Vec<Mod>, String> {
+    discover_observed(root, &mut |_| {})
+}
+pub fn discover_observed(
+    root: &Path,
+    observe: &mut mixins_core::progress::Observer<'_>,
+) -> Result<Vec<Mod>, String> {
+    use mixins_core::progress::Event;
     let root = root
         .canonicalize()
         .map_err(|e| format!("{}: {e}", root.display()))?;
@@ -250,6 +257,10 @@ pub fn discover(root: &Path) -> Result<Vec<Mod>, String> {
             ));
         }
         if !meta.is_dir() || !p.join("mixin.toml").exists() {
+            observe(Event::Detail(format!(
+                "Ignoring {}: not a mod package",
+                p.display()
+            )));
             continue;
         }
         let manifest_path = p.join("mixin.toml");
@@ -265,6 +276,10 @@ pub fn discover(root: &Path) -> Result<Vec<Mod>, String> {
         }
         let manifest = load(&manifest_path)?;
         if !manifest.package.enabled {
+            observe(Event::Skipped(format!(
+                "mod {}: disabled by manifest",
+                manifest.package.id
+            )));
             continue;
         }
         let mut files = Vec::new();
@@ -296,6 +311,15 @@ pub fn discover(root: &Path) -> Result<Vec<Mod>, String> {
                 });
             }
         }
+        observe(Event::Info(format!(
+            "mod {} {}: {} overlay files, {} injections, {} edits, {} components",
+            manifest.package.id,
+            manifest.package.version,
+            files.len(),
+            manifest.injections.len(),
+            manifest.edits.len(),
+            manifest.components.len()
+        )));
         let id = manifest.package.id.clone();
         if mods
             .insert(
