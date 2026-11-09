@@ -176,10 +176,12 @@ pub fn lex(source: &str) -> Lexed {
                     error = Some("unterminated quoted literal");
                 }
             }
-        } else if b[i].is_ascii_alphabetic() || b[i] == b'_' || b[i] >= 128 {
+        } else if b[i].is_ascii_alphabetic() || matches!(b[i], b'_' | b'$') || b[i] >= 128 {
             kind = Kind::Identifier;
             i += 1;
-            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] >= 128) {
+            while i < b.len()
+                && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'_' | b'$') || b[i] >= 128)
+            {
                 i += 1;
             }
         } else if b[i].is_ascii_digit()
