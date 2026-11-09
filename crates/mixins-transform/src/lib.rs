@@ -46,6 +46,10 @@ pub enum Target {
         callee: String,
         argument: Option<usize>,
     },
+    MacroBody {
+        name: String,
+        arguments: Option<Vec<String>>,
+    },
     Function {
         name: String,
         parameters: Option<String>,
@@ -322,6 +326,35 @@ impl Plan {
                             call
                         };
                         (selected, None)
+                    }
+                    Target::MacroBody { name, arguments } => {
+                        if !index.diagnostics.is_empty() {
+                            return Err(
+                                "macro body selection requires valid structural source".into()
+                            );
+                        }
+                        let found: Vec<_> = index
+                            .macro_bodies
+                            .iter()
+                            .filter(|node| {
+                                &node.name == name
+                                    && arguments.as_ref().is_none_or(|args| {
+                                        args.len() == node.arguments.len()
+                                            && args.iter().zip(&node.arguments).all(|(a, s)| {
+                                                a.trim() == source[s.start..s.end].trim()
+                                            })
+                                    })
+                            })
+                            .collect();
+                        match found.as_slice() {
+                            [node] => (node.declaration, Some(node.body)),
+                            _ => {
+                                return Err(format!(
+                                    "macro body {name}: {} matches; specify arguments",
+                                    found.len()
+                                ));
+                            }
+                        }
                     }
                     Target::Function { name, parameters } => {
                         let f = index.select_function(name, parameters.as_deref(), source)?;
