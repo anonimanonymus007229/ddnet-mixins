@@ -107,13 +107,21 @@ Place new `.cpp` and `.h` files under `workspace/mods/my-mod/src/game/client/…
 
 HEAD inserts at the beginning of a function body. TAIL inserts at its lexical end, **not before every return**. Generic edits support INSERT, REPLACE and REMOVE with documented target restrictions. Ambiguous matches and overlapping edits fail instead of choosing a location.
 
-Components can declare their header, CGameClient member and `all`/`input` registration in `[[components]]`. BEFORE_CALL, AFTER_CALL, MODIFY_ARG, RETURN, OVERWRITE and explicit-block WRAP are available with conservative restrictions. Config edits are checked for identifier/console-name collisions. See the [advanced feature guide](docs/advanced-injections.md).
+Use `[[components]]` with a `members = [{ class, header, member }, ...]` array
+for a group sharing `register_in`, or `[[component]]` with a single `member`
+and optional `priority`. BEFORE_CALL, AFTER_CALL, MODIFY_ARG, RETURN, OVERWRITE and explicit-block WRAP are available with conservative restrictions. Config edits are checked for identifier/console-name collisions. See the [advanced feature guide](docs/advanced-injections.md).
 
 Dependencies have deterministic ordering; compatibility and dependency version constraints currently accept only `*`. The parser covers a subset of C++ and explicitly reports unsupported regions. `check` validates selectors, conflicts and structural CMake placement—it does not run a compiler or validate snippet semantics.
+
+Any rule table can select client folders with
+`clients = { include = ["TClient", "RushieClient-*"], exclude = ["OldClient"] }`.
+See [client-specific rules](docs/client-filters.md). Generic edits also accept
+`content_file` for keeping large config snippets in `hooks/`.
 
 ## Documentation
 
 - [Edit syntax, selectors and limitations](docs/edits.md)
+- [Client-specific rule filters](docs/client-filters.md)
 - [Staging, ownership checks, CMake and build recovery](docs/staging.md)
 - [Compatibility and limitations](docs/compatibility.md)
 - [CLI logging and build progress](docs/logging.md)

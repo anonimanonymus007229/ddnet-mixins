@@ -3,7 +3,7 @@ id = "component-example"
 name = "Component lifecycle example"
 version = "0.1.0"
 
-[[components]]
+[[component]]
 class = "CDdmixExample"
 header = "game/client/components/ddmix_example.h"
 member = "m_DdmixExample"

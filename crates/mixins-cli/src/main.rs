@@ -37,6 +37,9 @@ enum Commands {
         workspace: PathBuf,
         #[arg(long)]
         mods: Option<PathBuf>,
+        /// DDNet context for clients include/exclude filters.
+        #[arg(long)]
+        ddnet: Option<PathBuf>,
     },
     /// Resolve edits, detect conflicts and emit original-span patches (no writes).
     Plan {
@@ -184,15 +187,21 @@ fn run(cli: Cli, log: &mut Logger) -> Result<bool, String> {
             log.event(Event::Success(format!("Created {}", path.display())));
             Ok(true)
         }
-        Commands::List { workspace, mods } => {
+        Commands::List {
+            workspace,
+            mods,
+            ddnet,
+        } => {
             log.event(Event::Stage {
                 name: "discovery",
                 message: "Discovering and ordering mod packages".into(),
             });
-            let mods = mixins_manifest::discover_observed(
-                &mods.unwrap_or_else(|| workspace.join("mods")),
-                &mut |e| log.event(e),
-            )?;
+            let root = mods.unwrap_or_else(|| workspace.join("mods"));
+            let mods = if let Some(ddnet) = ddnet {
+                mixins_manifest::discover_for(&root, &ddnet, &mut |e| log.event(e))?
+            } else {
+                mixins_manifest::discover_observed(&root, &mut |e| log.event(e))?
+            };
             log.event(Event::Count {
                 name: "mods",
                 value: mods.len(),

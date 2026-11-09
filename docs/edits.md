@@ -32,7 +32,8 @@ See [examples/basic-hooks](../examples/basic-hooks) for a complete mod package.
 
 `action` is INSERT, REPLACE or REMOVE. INSERT requires `position`:
 BEFORE, AFTER, BODY_START or BODY_END (the latter two require a body).
-INSERT/REPLACE requires `content`; REMOVE must omit it. REPLACE/REMOVE must
+INSERT/REPLACE requires exactly one of `content` or
+`content_file = "hooks/filename.cpp"`; REMOVE must omit both. REPLACE/REMOVE must
 omit position. Every edit has a unique lowercase/hyphenated `id`, a normalized
 `src/...` file path, and optional integer `priority` (default 0).
 
@@ -74,12 +75,18 @@ body snippet. `hooks/` is not scanned as an overlay or added to target_sources.
 
 This works for every injection kind, including WRAP (`{{original}}` is checked
 after reading the file). Empty snippets are permitted, like explicit empty
-inline content. Generic `[[edits]]` still uses inline `content`; `content_file`
-is currently an injection field only. `content_file` performs textual insertion
+inline content. Generic `[[edits]]` also accepts `content_file` for INSERT/REPLACE,
+using the same hooks path/safety rules; content is resolved before planning. `content_file` performs textual insertion
 at validated syntax spans; see `examples/controls-hook`. For a separate generated
 function with explicit parameters use [helper and bindings](helpers.md), as in
 `examples/controls-helper`. It is a different mode, not implicit helper generation
 for every snippet.
+
+## Client-specific rules
+
+Any table-array rule can include a common `clients` include/exclude filter.
+See [client folder filters](client-filters.md) for patterns, mutually exclusive
+variants and skipped-rule behavior.
 
 ## Ordering, conflicts and preservation
 

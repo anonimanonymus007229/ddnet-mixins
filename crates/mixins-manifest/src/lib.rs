@@ -1,4 +1,5 @@
 //! Strict initial manifest schema; unsupported transformations are never ignored.
+mod rules;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -18,7 +19,7 @@ pub struct Manifest {
     pub edits: Vec<mixins_transform::Edit>,
     #[serde(default)]
     pub injections: Vec<mixins_transform::Injection>,
-    #[serde(default)]
+    #[serde(default, rename = "component")]
     pub components: Vec<Component>,
 }
 #[derive(Debug, Deserialize, Serialize)]
@@ -70,8 +71,55 @@ pub fn valid_id(id: &str) -> bool {
         && !id.ends_with('-')
 }
 pub fn load(path: &Path) -> Result<Manifest, String> {
+    load_context(path, None, &mut |_| {})
+}
+fn load_context(
+    path: &Path,
+    folder: Option<&str>,
+    observe: &mut mixins_core::progress::Observer<'_>,
+) -> Result<Manifest, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut m: Manifest = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut value: toml::Value =
+        toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    rules::filter(&mut value, folder, &path.display().to_string(), observe)?;
+    rules::expand(&mut value).map_err(|e| format!("{}: {e}", path.display()))?;
+    // content_file is a common edit payload, resolved before typed validation.
+    if let Some(edits) = value.get_mut("edits").and_then(|v| v.as_array_mut()) {
+        for edit in edits {
+            if let Some(t) = edit.as_table_mut() {
+                if let Some(file) = t.remove("content_file") {
+                    let id = t
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unnamed")
+                        .to_owned();
+                    if t.contains_key("content") {
+                        return Err(format!(
+                            "{}: edit {id}: choose content or content_file, not both",
+                            path.display()
+                        ));
+                    }
+                    if t.get("action").and_then(|v| v.as_str()) == Some("REMOVE") {
+                        return Err(format!(
+                            "{}: edit {id}: REMOVE cannot use content_file",
+                            path.display()
+                        ));
+                    }
+                    let relative = file.as_str().ok_or("edit content_file must be a string")?;
+                    let body = read_hook(path, relative).map_err(|e| {
+                        format!(
+                            "{}: edit {id}, content_file {relative:?}: {e}",
+                            path.display()
+                        )
+                    })?;
+                    t.insert("content".into(), toml::Value::String(body));
+                }
+            }
+        }
+    }
+    let mut m: Manifest = value
+        .try_into()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     if !valid_id(&m.package.id)
         || m.package.name.trim().is_empty()
         || m.package.version.trim().is_empty()
@@ -237,6 +285,21 @@ pub fn discover_observed(
     root: &Path,
     observe: &mut mixins_core::progress::Observer<'_>,
 ) -> Result<Vec<Mod>, String> {
+    discover_context(root, None, observe)
+}
+pub fn discover_for(
+    root: &Path,
+    ddnet: &Path,
+    observe: &mut mixins_core::progress::Observer<'_>,
+) -> Result<Vec<Mod>, String> {
+    let folder = rules::folder(ddnet)?;
+    discover_context(root, Some(&folder), observe)
+}
+fn discover_context(
+    root: &Path,
+    folder: Option<&str>,
+    observe: &mut mixins_core::progress::Observer<'_>,
+) -> Result<Vec<Mod>, String> {
     use mixins_core::progress::Event;
     let root = root
         .canonicalize()
@@ -274,7 +337,7 @@ pub fn discover_observed(
                 manifest_path.display()
             ));
         }
-        let manifest = load(&manifest_path)?;
+        let manifest = load_context(&manifest_path, folder, observe)?;
         if !manifest.package.enabled {
             observe(Event::Skipped(format!(
                 "mod {}: disabled by manifest",

@@ -33,13 +33,32 @@ effects and dispatch behavior and are not defined by this release.
 ## Components
 
 ```toml
-[[components]]
+[[component]]
 class = "CDdmixExample"
 header = "game/client/components/ddmix_example.h"
 member = "m_DdmixExample"
 register_in = ["all", "input"]
 priority = 0
 ```
+
+For a batch sharing registration categories, use `[[components]]` with `members`:
+
+```toml
+[[components]]
+register_in = ["all"]
+members = [
+  { class = "COne", header = "game/client/components/one.h", member = "m_One" },
+  { class = "CTwo", header = "game/client/components/two.h", member = "m_Two" },
+]
+```
+
+Groups have no `priority`, `class`, `header` or singular `member` fields. Each
+member records its own class/header/member; their array order is preserved.
+For explicit priority or different categories, use `[[component]]` with a single
+`member` and optional `priority`. Old singular `[[components]]` declarations must
+be renamed to `[[component]]`. Groups expand before individual declarations;
+priority orders components within a mod, with declaration order breaking ties.
+Both forms and individual group members support [client filters](client-filters.md).
 
 The header must be discovered in the mod's src tree and declare the named class
 with direct `public CComponent` inheritance. `all` is mandatory (interfaces and
@@ -50,8 +69,8 @@ of DDNet's actual `Sizeof()` and `OnInit()` callbacks.
 The adapter verifies the actual CGameClient class and OnConsoleInit collection
 structures, then emits generic include/member/initializer-block inserts.
 Existing render/input order remains unchanged; new members append to selected
-collections in deterministic mod/priority/ID order. Dependencies order mods;
-priority orders generated edits within a mod. Missing/ambiguous or changed
+collections in deterministic mod/priority/declaration order. Dependencies order
+mods; priority orders individual component declarations within a mod. Missing/ambiguous or changed
 registration structures fail. Existing member names and duplicate declarations
 across mods fail. No raw upstream line offsets are hardcoded.
 

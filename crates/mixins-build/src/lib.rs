@@ -112,7 +112,7 @@ pub fn plan_observed(
         message: format!("Loading mods from {}", mods_root.display()),
     });
     let ddnet = io(ddnet.canonicalize())?;
-    let mods = mixins_manifest::discover_observed(mods_root, observe)?;
+    let mods = mixins_manifest::discover_for(mods_root, &ddnet, observe)?;
     observe(Event::Count {
         name: "mods",
         value: mods.len(),
@@ -180,7 +180,29 @@ pub fn plan_observed(
                 format!("mod {}, component {}: {e}", m.manifest.package.id, c.class)
             })?);
         }
-        edits.sort_by(|a, b| (a.priority, &a.id).cmp(&(b.priority, &b.id)));
+        let component_order: std::collections::BTreeMap<_, _> = m
+            .manifest
+            .components
+            .iter()
+            .enumerate()
+            .map(|(n, c)| {
+                (
+                    format!(
+                        "component-{}-",
+                        c.member.to_ascii_lowercase().replace('_', "-")
+                    ),
+                    n,
+                )
+            })
+            .collect();
+        let rank = |e: &Edit| {
+            component_order
+                .iter()
+                .filter(|(prefix, _)| e.id.starts_with(prefix.as_str()))
+                .max_by_key(|(prefix, _)| prefix.len())
+                .map_or(usize::MAX, |(_, n)| *n)
+        };
+        edits.sort_by(|a, b| (a.priority, rank(a), &a.id).cmp(&(b.priority, rank(b), &b.id)));
         for e in edits {
             grouped
                 .entry(e.file.clone())
