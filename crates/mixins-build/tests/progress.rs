@@ -43,9 +43,19 @@ fn observed_plan_reports_real_mods_edits_components_and_coverage_without_changin
             .any(|e| matches!(e,Event::Info(s)if s.contains("register CDdmixExample")))
     );
     assert!(events.iter().any(|e|matches!(e,Event::Detail(s)if s.contains("controls-helper/snapinput-helper at src/game/client/components/controls.cpp:"))));
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e,Event::Warning(s)if s.contains("unsupported syntax regions")))
-    );
+    let expected_warnings = observed
+        .files
+        .keys()
+        .filter(|file| {
+            let source = std::fs::read_to_string(ddnet.join(file)).unwrap();
+            !mixins_parser::parse(&source, &mixins_lexer::lex(&source))
+                .unsupported
+                .is_empty()
+        })
+        .count();
+    let actual_warnings = events
+        .iter()
+        .filter(|e| matches!(e,Event::Warning(s)if s.contains("unsupported syntax regions")))
+        .count();
+    assert_eq!(actual_warnings, expected_warnings);
 }

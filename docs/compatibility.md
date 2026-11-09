@@ -24,11 +24,18 @@ public CComponent inheritance; see [component declarations](advanced-injections.
 ## C++ parsing and selectors
 
 Supported declaration patterns include simple namespaces/classes, qualified
-function definitions, common qualifiers/operators, simple template heads/types,
-noexcept expressions, trailing returns and parenthesized constructor initializers.
-Function-pointer declarators, arbitrary template expressions, anonymous namespaces,
-braced constructor initializers and many macro-decorated declarations are not
-supported reliably.
+function definitions (including elaborated class/struct return types), common
+qualifiers/operators, simple template heads/types, noexcept expressions and
+trailing returns. Parenthesized/braced constructor member initializers are
+separated from the actual function body. Function-type template arguments such
+as std::function<bool(int, int)> are supported in return types.
+
+Enums, scoped enums and their enumerators, anonymous struct/union declaration
+boundaries, and simple braced variable/array initializers are indexed separately
+rather than treated as unknown function bodies. Anonymous aggregate members do
+not receive invented globally qualified type names. Function-pointer declarators,
+arbitrary template expressions, anonymous namespaces and many macro-decorated
+declarations remain unsupported.
 
 `inspect` emits a JSON inventory of supported nodes, unsupported regions and
 structural diagnostics. It returns nonzero if diagnostics occur, including in

@@ -1,5 +1,6 @@
 //! Conservative structural index, not a complete C++ grammar.
 //! Unsupported declaration bodies are reported and never searched as declarations.
+mod declarations;
 pub mod syntax;
 use mixins_core::Diagnostic;
 use mixins_lexer::{Kind, Lexed, Token};
@@ -33,11 +34,39 @@ pub struct Class {
     pub body: Span,
     pub line: u32,
 }
+#[derive(Debug, Clone, Serialize)]
+pub struct EnumNode {
+    pub qualified_name: Option<String>,
+    pub scoped: bool,
+    pub declaration: Span,
+    pub body: Span,
+    pub enumerators: Vec<Enumerator>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct Enumerator {
+    pub name: String,
+    pub span: Span,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct AnonymousAggregate {
+    pub kind: String,
+    pub declaration: Span,
+    pub body: Span,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct Variable {
+    pub qualified_name: String,
+    pub declaration: Span,
+    pub initializer: Span,
+}
 #[derive(Debug, Serialize)]
 pub struct Index {
     pub functions: Vec<Function>,
     pub declarations: Vec<FunctionDeclaration>,
     pub classes: Vec<Class>,
+    pub enums: Vec<EnumNode>,
+    pub anonymous_aggregates: Vec<AnonymousAggregate>,
+    pub variables: Vec<Variable>,
     pub diagnostics: Vec<Diagnostic>,
     pub unsupported: Vec<Diagnostic>,
 }
@@ -240,6 +269,15 @@ impl Parser<'_> {
                 continue;
             }
             if w == "{" {
+                // Constructor member initializers can themselves contain braces.
+                // Resolve the full initializer grammar before declaring a body.
+                if let Some((body, close)) = self.constructor_body(begin, end, scope) {
+                    if close < end && self.function(begin, body, close, scope) {
+                        p = close + 1;
+                        begin = p;
+                        continue;
+                    }
+                }
                 let Some(close) = self.close(p).filter(|c| *c < end) else {
                     self.unsupported(
                         p,
@@ -255,6 +293,30 @@ impl Parser<'_> {
                 } else {
                     begin
                 };
+                // Recognize declarators before interpreting leading `class` or
+                // `struct` as definitions (they can be elaborated return types).
+                if self.function(begin, p, close, scope) {
+                    p = close + 1;
+                    begin = p;
+                    continue;
+                }
+                if self.enumeration(begin, head, p, close, scope) {
+                    p = close + 1;
+                    begin = p;
+                    continue;
+                }
+                if let Some(declaration_end) =
+                    self.anonymous_aggregate(begin, head, p, close, end, scope)
+                {
+                    p = declaration_end + 1;
+                    begin = p;
+                    continue;
+                }
+                if let Some(declaration_end) = self.braced_variable(begin, p, close, end, scope) {
+                    p = declaration_end + 1;
+                    begin = p;
+                    continue;
+                }
                 let header: Vec<String> = (head..p).map(|q| self.word(q).to_owned()).collect();
                 let class_head = header
                     .first()
@@ -273,6 +335,7 @@ impl Parser<'_> {
                     };
                     // Refuse templates, attributes, macro decorations and anonymous scopes.
                     let valid = !name.is_empty()
+                        && !header.iter().any(|s| matches!(s.as_str(), "(" | ")" | "="))
                         && if namespace {
                             parts.iter().all(|s| {
                                 s == "::" || s.chars().all(|c| c.is_alphanumeric() || c == '_')
@@ -293,7 +356,7 @@ impl Parser<'_> {
                     } else {
                         self.unsupported(begin, close, "unsupported class/namespace declarator");
                     }
-                } else if !self.function(begin, p, close, scope) {
+                } else {
                     self.unsupported(begin.min(p), close, "unsupported declaration body (initializer, lambda, template, macro or complex declarator)");
                 }
                 p = close + 1;
@@ -395,7 +458,11 @@ impl Parser<'_> {
         let constructor =
             scope.rsplit("::").next() == Some(bare) || name.rsplit("::").nth(1) == Some(bare);
         // A bare macro-like invocation must not be mistaken for a function.
-        if name_start == begin && !constructor {
+        if (name_start == begin && !constructor)
+            || (name_start > begin
+                && !constructor
+                && !self.type_prefix(declaration_start, name_start))
+        {
             return false;
         }
         let mut suffix = param_close + 1;
@@ -467,9 +534,7 @@ impl Parser<'_> {
         if suffix != body {
             return false;
         }
-        if (declaration_start..name_start)
-            .any(|i| matches!(self.word(i), ":" | ")" | "(" | "{" | "}"))
-        {
+        if declaration_start < name_start && !self.type_prefix(declaration_start, name_start) {
             return false;
         }
         self.index.functions.push(Function {
@@ -516,6 +581,9 @@ pub fn parse(source: &str, lexed: &Lexed) -> Index {
             functions: vec![],
             declarations: vec![],
             classes: vec![],
+            enums: vec![],
+            anonymous_aggregates: vec![],
+            variables: vec![],
             diagnostics,
             unsupported: vec![],
         },
