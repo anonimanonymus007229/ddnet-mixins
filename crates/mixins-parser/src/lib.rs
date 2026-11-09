@@ -1,6 +1,14 @@
 //! Conservative structural index, not a complete C++ grammar.
 //! Unsupported declaration bodies are reported and never searched as declarations.
+mod aggregates;
+mod annotations;
+mod attributes;
+mod conditional;
 mod declarations;
+mod declarator;
+mod lambdas;
+mod macros;
+mod preprocessor;
 pub mod syntax;
 use mixins_core::Diagnostic;
 use mixins_lexer::{Kind, Lexed, Token};
@@ -41,6 +49,8 @@ pub struct EnumNode {
     pub declaration: Span,
     pub body: Span,
     pub enumerators: Vec<Enumerator>,
+    /// Directives whose expansion may add more enumerators; not evaluated.
+    pub opaque_regions: Vec<Span>,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct Enumerator {
@@ -59,6 +69,64 @@ pub struct Variable {
     pub declaration: Span,
     pub initializer: Span,
 }
+#[derive(Debug, Clone, Serialize)]
+pub struct TypeAlias {
+    pub qualified_name: String,
+    pub declaration: Span,
+    pub target: Span,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct MacroDeclaration {
+    pub name: String,
+    pub span: Span,
+    pub arguments: Vec<Span>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct MacroBody {
+    pub name: String,
+    pub declaration: Span,
+    pub arguments: Vec<Span>,
+    pub body: Span,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct ConditionalFunction {
+    pub declaration: Span,
+    pub alternatives: Vec<Function>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct Namespace {
+    pub qualified_name: String,
+    pub anonymous: bool,
+    pub inline: bool,
+    pub declaration: Span,
+    pub body: Span,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct Lambda {
+    pub captures: Span,
+    pub body: Span,
+    pub expression: Span,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct Constraint {
+    pub span: Span,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct Annotation {
+    pub name: String,
+    pub span: Span,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct Attribute {
+    pub syntax: String,
+    pub span: Span,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct Linkage {
+    pub language: String,
+    pub declaration: Span,
+    pub body: Span,
+}
 #[derive(Debug, Serialize)]
 pub struct Index {
     pub functions: Vec<Function>,
@@ -67,6 +135,16 @@ pub struct Index {
     pub enums: Vec<EnumNode>,
     pub anonymous_aggregates: Vec<AnonymousAggregate>,
     pub variables: Vec<Variable>,
+    pub attributes: Vec<Attribute>,
+    pub linkages: Vec<Linkage>,
+    pub type_aliases: Vec<TypeAlias>,
+    pub macro_bodies: Vec<MacroBody>,
+    pub macro_declarations: Vec<MacroDeclaration>,
+    pub annotations: Vec<Annotation>,
+    pub constraints: Vec<Constraint>,
+    pub lambdas: Vec<Lambda>,
+    pub namespaces: Vec<Namespace>,
+    pub conditional_functions: Vec<ConditionalFunction>,
     pub diagnostics: Vec<Diagnostic>,
     pub unsupported: Vec<Diagnostic>,
 }
@@ -98,6 +176,10 @@ pub fn structure(source: &str, lexed: &Lexed) -> Structure {
         conditional: vec![false; lexed.tokens.len()],
         diagnostics: Vec::new(),
     };
+    let linkage_pairs = preprocessor::linkage_pairs(source, lexed);
+    for (&open, &close) in &linkage_pairs {
+        out.pairs[open] = Some(close);
+    }
     let mut stack: Vec<usize> = Vec::new();
     let mut frames: Vec<Vec<usize>> = Vec::new();
     let mut invalid = BTreeSet::new();
@@ -128,7 +210,7 @@ pub fn structure(source: &str, lexed: &Lexed) -> Structure {
             }
             continue;
         }
-        if t.kind != Kind::Punctuation {
+        if t.kind != Kind::Punctuation || linkage_pairs.contains_key(&i) {
             continue;
         }
         if matches!(word, "(" | "[" | "{") {
@@ -231,7 +313,8 @@ impl Parser<'_> {
                 "(" | "[" => {
                     p = self.close(p)?;
                 }
-                ";" | "{" | "}" | "=" => return None,
+                "=" => {}
+                ";" | "{" | "}" => return None,
                 _ => {}
             }
             p += 1;
@@ -242,6 +325,18 @@ impl Parser<'_> {
         let mut p = start;
         let mut begin = start;
         while p < end {
+            if p == begin {
+                if let Some(close) = self.macro_declaration(begin, end) {
+                    p = close + 1;
+                    begin = p;
+                    continue;
+                }
+            }
+            if let Some(close) = self.conditional_function(p, end, scope) {
+                p = close + 1;
+                begin = p;
+                continue;
+            }
             let w = self.word(p);
             if w == ";" && self.function(begin, p, p, scope) {
                 if let Some(f) = self.index.functions.pop() {
@@ -288,14 +383,41 @@ impl Parser<'_> {
                     // otherwise masquerade as top-level functions/classes.
                     return;
                 };
-                let head = if self.word(begin) == "template" && begin + 1 < p {
-                    self.angle_end(begin + 1, p).map_or(begin, |n| n + 1)
+                let first = self.skip_attributes(begin, p);
+                let mut head = if first < p && self.word(first) == "template" && first + 1 < p {
+                    self.angle_end(first + 1, p)
+                        .map_or(first, |n| self.skip_attributes(n + 1, p))
                 } else {
-                    begin
+                    first
                 };
+                if head + 2 == p
+                    && self.word(head) == "extern"
+                    && self.token(head + 1).kind == Kind::String
+                {
+                    self.record_attributes(begin, p);
+                    self.index.linkages.push(Linkage {
+                        language: self.word(head + 1).into(),
+                        declaration: self.span(begin, close),
+                        body: self.span(p, close),
+                    });
+                    self.scope(p + 1, close, scope);
+                    p = close + 1;
+                    begin = p;
+                    continue;
+                }
                 // Recognize declarators before interpreting leading `class` or
                 // `struct` as definitions (they can be elaborated return types).
                 if self.function(begin, p, close, scope) {
+                    p = close + 1;
+                    begin = p;
+                    continue;
+                }
+                if let Some(last) = self.typedef_aggregate(begin, p, close, end, scope) {
+                    p = last + 1;
+                    begin = p;
+                    continue;
+                }
+                if self.macro_body(begin, p, close) {
                     p = close + 1;
                     begin = p;
                     continue;
@@ -312,44 +434,112 @@ impl Parser<'_> {
                     begin = p;
                     continue;
                 }
+                if let Some(last) = self.lambda_variable(begin, p, close, end, scope) {
+                    p = last + 1;
+                    begin = p;
+                    continue;
+                }
                 if let Some(declaration_end) = self.braced_variable(begin, p, close, end, scope) {
                     p = declaration_end + 1;
                     begin = p;
                     continue;
                 }
-                let header: Vec<String> = (head..p).map(|q| self.word(q).to_owned()).collect();
+                let mut header = Vec::new();
+                let mut q = head;
+                while q < p {
+                    if let Some(end) = self
+                        .annotation_end(q, p)
+                        .or_else(|| self.attribute_end(q, p))
+                    {
+                        q = end + 1;
+                    } else {
+                        header.push(self.word(q).to_owned());
+                        q += 1;
+                    }
+                }
+                if header
+                    .first()
+                    .is_some_and(|s| matches!(s.as_str(), "static" | "inline"))
+                    && header
+                        .get(1)
+                        .is_some_and(|s| matches!(s.as_str(), "class" | "struct" | "union"))
+                {
+                    header.remove(0);
+                    head += 1;
+                }
                 let class_head = header
                     .first()
                     .is_some_and(|h| matches!(h.as_str(), "class" | "struct" | "union"));
-                let namespace = header.first().is_some_and(|h| h == "namespace");
+                let inline_namespace = header.first().is_some_and(|h| h == "inline")
+                    && header.get(1).is_some_and(|h| h == "namespace");
+                let namespace =
+                    header.first().is_some_and(|h| h == "namespace") || inline_namespace;
                 if class_head || namespace {
                     let name_end = header
                         .iter()
                         .position(|s| s == ":" || s == "final")
                         .unwrap_or(header.len());
-                    let parts = &header[1..name_end];
-                    let name = if namespace {
-                        parts.join("")
+                    let parts = &header[if inline_namespace { 2 } else { 1 }..name_end];
+                    let anonymous = namespace && parts.is_empty();
+                    let name = if anonymous {
+                        format!("(anonymous@{})", self.token(head).start)
                     } else {
-                        parts.first().cloned().unwrap_or_default()
+                        parts.join("")
                     };
                     // Refuse templates, attributes, macro decorations and anonymous scopes.
                     let valid = !name.is_empty()
-                        && !header.iter().any(|s| matches!(s.as_str(), "(" | ")" | "="))
+                        && (namespace || self.class_header_tail(head, p))
                         && if namespace {
                             parts.iter().all(|s| {
                                 s == "::" || s.chars().all(|c| c.is_alphanumeric() || c == '_')
                             })
                         } else {
-                            parts.len() == 1
+                            let mut cursor = head + 1;
+                            while let Some(end) = self
+                                .annotation_end(cursor, p)
+                                .or_else(|| self.attribute_end(cursor, p))
+                            {
+                                cursor = end + 1;
+                            }
+                            let mut valid =
+                                cursor < p && self.token(cursor).kind == Kind::Identifier;
+                            if valid {
+                                cursor += 1;
+                            }
+                            while valid && cursor < p && self.word(cursor) == "::" {
+                                cursor += 1;
+                                valid = cursor < p && self.token(cursor).kind == Kind::Identifier;
+                                if valid {
+                                    cursor += 1;
+                                }
+                            }
+                            if valid && cursor < p && self.word(cursor) == "<" {
+                                if let Some(end) = self.angle_end(cursor, p) {
+                                    cursor = end + 1;
+                                } else {
+                                    valid = false;
+                                }
+                            }
+                            valid && (cursor == p || matches!(self.word(cursor), ":" | "final"))
                         };
                     if valid {
+                        self.record_attributes(begin, p);
+                        self.record_annotations(begin, p);
                         let qualified = qualify(scope, &name);
                         if class_head {
                             self.index.classes.push(Class {
                                 qualified_name: qualified.clone(),
                                 body: self.span(p, close),
                                 line: self.token(begin).line,
+                            });
+                        }
+                        if namespace {
+                            self.index.namespaces.push(Namespace {
+                                qualified_name: qualified.clone(),
+                                anonymous,
+                                inline: inline_namespace,
+                                declaration: self.span(begin, close),
+                                body: self.span(p, close),
                             });
                         }
                         self.scope(p + 1, close, &qualified);
@@ -377,16 +567,39 @@ impl Parser<'_> {
         if begin >= body {
             return false;
         }
-        let mut q = begin;
+        if self.indirect_function(begin, body, close, scope) {
+            return true;
+        }
+        let mut q = self.skip_attributes(begin, body);
+        if q >= body {
+            return false;
+        }
         if self.word(q) == "template" {
             let Some(end) = self.angle_end(q + 1, body) else {
                 return false;
             };
-            q = end + 1;
+            q = self.skip_attributes(end + 1, body);
+        }
+        let mut constraint_spans = vec![];
+        if q < body && self.word(q) == "requires" {
+            let first = q;
+            q += 1;
+            if q >= body || self.word(q) != "(" {
+                return false;
+            }
+            let Some(end) = self.close(q) else {
+                return false;
+            };
+            constraint_spans.push(self.span(first, end));
+            q = self.skip_attributes(end + 1, body);
         }
         let declaration_start = q;
         let mut parameters = None;
         while q < body {
+            if let Some(end) = self.attribute_end(q, body) {
+                q = end + 1;
+                continue;
+            }
             if matches!(
                 self.word(q),
                 "=" | "[" | ">" | "template" | "typedef" | "using" | "return"
@@ -410,6 +623,21 @@ impl Parser<'_> {
                         return false;
                     };
                     q = end + 1;
+                } else if self.token(q).kind == Kind::Identifier {
+                    while q < body && self.word(q) != "(" {
+                        if self.word(q) == "<" {
+                            let Some(end) = self.angle_end(q, body) else {
+                                return false;
+                            };
+                            q = end + 1;
+                        } else if self.token(q).kind == Kind::Identifier
+                            || matches!(self.word(q), "::" | "*" | "&" | "&&")
+                        {
+                            q += 1;
+                        } else {
+                            return false;
+                        }
+                    }
                 } else {
                     q += 1;
                 }
@@ -433,6 +661,8 @@ impl Parser<'_> {
             return false;
         }
         let operator = (declaration_start..open).find(|&i| self.word(i) == "operator");
+        let conversion =
+            operator.is_some_and(|op| op + 1 < open && self.token(op + 1).kind == Kind::Identifier);
         if operator.is_none() && self.token(open - 1).kind != Kind::Identifier {
             return false;
         }
@@ -440,13 +670,38 @@ impl Parser<'_> {
         if name_start > begin && self.word(name_start - 1) == "~" {
             name_start -= 1;
         }
-        while name_start >= begin + 2
-            && self.word(name_start - 1) == "::"
-            && self.token(name_start - 2).kind == Kind::Identifier
-        {
-            name_start -= 2;
+        while name_start >= begin + 2 && self.word(name_start - 1) == "::" {
+            if self.token(name_start - 2).kind == Kind::Identifier {
+                name_start -= 2;
+                continue;
+            }
+            if matches!(self.word(name_start - 2), ">" | ">>") {
+                let finish = name_start - 2;
+                let candidate = (begin..finish)
+                    .rev()
+                    .find(|&p| self.word(p) == "<" && self.angle_end(p, open) == Some(finish));
+                if let Some(angle) = candidate {
+                    if angle > begin && self.token(angle - 1).kind == Kind::Identifier {
+                        name_start = angle - 1;
+                        continue;
+                    }
+                }
+            }
+            break;
         }
-        let name = (name_start..open).map(|i| self.word(i)).collect::<String>();
+        let name = if conversion {
+            let op = operator.unwrap();
+            format!(
+                "{}operator {}",
+                (name_start..op).map(|i| self.word(i)).collect::<String>(),
+                (op + 1..open)
+                    .map(|i| self.word(i))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        } else {
+            (name_start..open).map(|i| self.word(i)).collect::<String>()
+        };
         if matches!(name.as_str(), "if" | "while" | "for" | "switch" | "catch") {
             return false;
         }
@@ -455,17 +710,28 @@ impl Parser<'_> {
             .next()
             .unwrap_or(&name)
             .trim_start_matches('~');
-        let constructor =
-            scope.rsplit("::").next() == Some(bare) || name.rsplit("::").nth(1) == Some(bare);
+        let constructor = scope
+            .rsplit("::")
+            .next()
+            .map(|s| s.split('<').next().unwrap_or(s))
+            == Some(bare)
+            || name
+                .rsplit("::")
+                .nth(1)
+                .map(|s| s.split('<').next().unwrap_or(s))
+                == Some(bare);
         // A bare macro-like invocation must not be mistaken for a function.
-        if (name_start == begin && !constructor)
+        if (name_start == begin && !constructor && !conversion)
             || (name_start > begin
                 && !constructor
                 && !self.type_prefix(declaration_start, name_start))
         {
             return false;
         }
-        let mut suffix = param_close + 1;
+        let mut suffix = self.skip_attributes(param_close + 1, body);
+        while let Some(end) = self.annotation_end(suffix, body) {
+            suffix = self.skip_attributes(end + 1, body);
+        }
         while suffix < body
             && matches!(
                 self.word(suffix),
@@ -480,6 +746,22 @@ impl Parser<'_> {
                 };
                 suffix = end + 1;
             }
+            suffix = self.skip_attributes(suffix, body);
+            while let Some(end) = self.annotation_end(suffix, body) {
+                suffix = self.skip_attributes(end + 1, body);
+            }
+        }
+        if suffix < body && self.word(suffix) == "requires" {
+            let first = suffix;
+            suffix += 1;
+            if suffix >= body || self.word(suffix) != "(" {
+                return false;
+            }
+            let Some(end) = self.close(suffix) else {
+                return false;
+            };
+            constraint_spans.push(self.span(first, end));
+            suffix = end + 1;
         }
         if suffix < body && self.word(suffix) == "->" {
             suffix += 1;
@@ -507,6 +789,12 @@ impl Parser<'_> {
                 suffix += 1;
                 while suffix < body && self.word(suffix) == "::" {
                     suffix += 2;
+                }
+                if suffix < body && self.word(suffix) == "<" {
+                    let Some(end) = self.angle_end(suffix, body) else {
+                        return false;
+                    };
+                    suffix = end + 1;
                 }
                 if suffix >= body || !matches!(self.word(suffix), "(" | "{") {
                     return false;
@@ -537,6 +825,11 @@ impl Parser<'_> {
         if declaration_start < name_start && !self.type_prefix(declaration_start, name_start) {
             return false;
         }
+        self.record_attributes(begin, body);
+        self.record_annotations(begin, body);
+        self.index
+            .constraints
+            .extend(constraint_spans.into_iter().map(|span| Constraint { span }));
         self.index.functions.push(Function {
             qualified_name: qualify(scope, &name),
             declaration: self.span(begin, close),
@@ -584,6 +877,16 @@ pub fn parse(source: &str, lexed: &Lexed) -> Index {
             enums: vec![],
             anonymous_aggregates: vec![],
             variables: vec![],
+            attributes: vec![],
+            linkages: vec![],
+            type_aliases: vec![],
+            macro_bodies: vec![],
+            macro_declarations: vec![],
+            annotations: vec![],
+            constraints: vec![],
+            lambdas: vec![],
+            namespaces: vec![],
+            conditional_functions: vec![],
             diagnostics,
             unsupported: vec![],
         },
@@ -607,6 +910,15 @@ impl Index {
             return Err(
                 "source has structural/lexical diagnostics; function selection refused".into(),
             );
+        }
+        if self
+            .conditional_functions
+            .iter()
+            .any(|node| node.alternatives.iter().any(|f| f.qualified_name == name))
+        {
+            return Err(format!(
+                "target {name}: conditional signature alternatives share a body; explicit branch-aware editing not yet supported"
+            ));
         }
         // An unsupported region may contain another overload. Never infer
         // uniqueness just because the supported subset happens to contain one.

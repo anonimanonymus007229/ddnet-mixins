@@ -7,7 +7,19 @@ impl Parser<'_> {
         let mut p = start;
         let mut named = false;
         while p < end {
+            if let Some(close) = self.attribute_end(p, end) {
+                p = close + 1;
+                continue;
+            }
             let word = self.word(p);
+            if word == "decltype" && p + 1 < end && self.word(p + 1) == "(" {
+                let Some(close) = self.close(p + 1).filter(|n| *n < end) else {
+                    return false;
+                };
+                named = true;
+                p = close + 1;
+                continue;
+            }
             if self.token(p).kind == Kind::Identifier {
                 if word == "extern" && p + 1 < end && self.token(p + 1).kind == Kind::String {
                     p += 2;
@@ -54,28 +66,59 @@ impl Parser<'_> {
         }
         named
     }
+    pub(super) fn class_header_tail(&self, head: usize, end: usize) -> bool {
+        let mut p = head + 1;
+        while p < end {
+            if let Some(close) = self
+                .attribute_end(p, end)
+                .or_else(|| self.annotation_end(p, end))
+            {
+                p = close + 1;
+                continue;
+            }
+            if self.word(p) == "<" {
+                let Some(close) = self.angle_end(p, end) else {
+                    return false;
+                };
+                p = close + 1;
+                continue;
+            }
+            if matches!(self.word(p), "(" | ")" | "=") {
+                return false;
+            }
+            p += 1;
+        }
+        true
+    }
     pub(super) fn constructor_body(
         &self,
         begin: usize,
         end: usize,
         scope: &str,
     ) -> Option<(usize, usize)> {
-        let mut open = begin;
+        let mut start = self.skip_attributes(begin, end);
+        if start < end && self.word(start) == "explicit" {
+            start += 1;
+        }
+        let mut open = start;
         while open < end && self.word(open) != "(" {
             if !matches!(self.word(open), "::" | "~") && self.token(open).kind != Kind::Identifier {
                 return None;
             }
             open += 1;
         }
-        if open == begin || open >= end {
+        if open == start || open >= end {
             return None;
         }
-        let name = (begin..open).map(|p| self.word(p)).collect::<String>();
+        let name = (start..open).map(|p| self.word(p)).collect::<String>();
         let bare = name.rsplit("::").next()?;
         if scope.rsplit("::").next() != Some(bare) && name.rsplit("::").nth(1) != Some(bare) {
             return None;
         }
         let mut p = self.close(open)? + 1;
+        while let Some(last) = self.annotation_end(p, end) {
+            p = last + 1;
+        }
         if p >= end || self.word(p) != ":" {
             return None;
         }
@@ -138,14 +181,23 @@ impl Parser<'_> {
             return false;
         }
         let mut entries = vec![];
+        let mut opaque = vec![];
         p = open + 1;
         while p < close {
+            if self.token(p).kind == Kind::Directive {
+                opaque.push(self.span(p, p));
+                p += 1;
+                continue;
+            }
             if self.token(p).kind != Kind::Identifier || self.word(p) == "return" {
                 return false;
             }
             let start = p;
             let name = self.word(p).to_owned();
             p += 1;
+            if p < close && self.word(p) == "(" {
+                return false;
+            }
             if p < close && self.word(p) == "=" {
                 p += 1;
                 let expr = p;
@@ -185,6 +237,7 @@ impl Parser<'_> {
             declaration: self.span(begin, close),
             body: self.span(open, close),
             enumerators: entries,
+            opaque_regions: opaque,
         });
         true
     }
@@ -205,6 +258,10 @@ impl Parser<'_> {
         while tail < end && self.word(tail) != ";" {
             if self.word(tail) == "[" {
                 tail = self.close(tail)? + 1;
+                continue;
+            }
+            if self.word(tail) == "=" && tail + 1 < end && self.word(tail + 1) == "{" {
+                tail = self.close(tail + 1)? + 1;
                 continue;
             }
             if self.token(tail).kind != Kind::Identifier
@@ -240,7 +297,14 @@ impl Parser<'_> {
         }
         let equal = (begin..open).find(|&p| self.word(p) == "=");
         let declaration_end = equal.unwrap_or(open);
-        let mut name_end = declaration_end;
+        let mut trimmed = declaration_end;
+        for q in begin..declaration_end {
+            if self.annotation_end(q, declaration_end) == Some(declaration_end - 1) {
+                trimmed = q;
+                break;
+            }
+        }
+        let mut name_end = trimmed;
         // Fixed array bounds are balanced tokens, not part of the identifier.
         while name_end > begin && self.word(name_end - 1) == "]" {
             name_end = self.close(name_end - 1)?;
@@ -249,10 +313,26 @@ impl Parser<'_> {
             return None;
         }
         let name = name_end - 1;
-        if matches!(self.word(begin), "class" | "struct" | "union") && self.word(name) == "final" {
-            return None;
+        let mut name_start = name;
+        while name_start >= begin + 2
+            && self.word(name_start - 1) == "::"
+            && self.token(name_start - 2).kind == Kind::Identifier
+        {
+            name_start -= 2;
         }
-        if self.token(name).kind != Kind::Identifier || !self.type_prefix(begin, name) {
+        if matches!(self.word(begin), "class" | "struct" | "union") {
+            let mut decoration = begin + 1;
+            while let Some(end) = self
+                .attribute_end(decoration, name)
+                .or_else(|| self.annotation_end(decoration, name))
+            {
+                decoration = end + 1;
+            }
+            if self.word(name) == "final" || decoration == name {
+                return None;
+            }
+        }
+        if self.token(name).kind != Kind::Identifier || !self.type_prefix(begin, name_start) {
             return None;
         }
         // No hidden declarator/call/lambda in the typed RHS. A simple constructor
@@ -263,8 +343,14 @@ impl Parser<'_> {
             }
         }
         let initializer_start = equal.map_or(open, |eq| eq + 1);
+        self.record_annotations(begin, open);
         self.index.variables.push(Variable {
-            qualified_name: qualify(scope, self.word(name)),
+            qualified_name: qualify(
+                scope,
+                &(name_start..=name)
+                    .map(|p| self.word(p))
+                    .collect::<String>(),
+            ),
             declaration: self.span(begin, close + 1),
             initializer: self.span(initializer_start, close),
         });

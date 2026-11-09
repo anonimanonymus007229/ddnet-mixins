@@ -36,9 +36,11 @@ fn no_guessed_functions_from_macros_lambdas_or_initializers() {
     let index = parse(source, &lex(source));
     assert_eq!(index.functions.len(), 1);
     assert_eq!(index.functions[0].qualified_name, "f");
-    assert_eq!(index.unsupported.len(), 2);
-    assert_eq!(index.variables.len(), 1);
-    assert_eq!(index.variables[0].qualified_name, "item");
+    assert_eq!(index.unsupported.len(), 0);
+    assert_eq!(index.lambdas.len(), 1);
+    assert_eq!(index.macro_bodies.len(), 1);
+    assert_eq!(index.variables.len(), 2);
+    assert_eq!(index.variables[1].qualified_name, "item");
 }
 #[test]
 fn template_overload_is_indexed_and_requires_disambiguation() {

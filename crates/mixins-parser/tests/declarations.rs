@@ -81,9 +81,8 @@ fn final_empty_classes_are_not_variables_and_multiple_ctor_braces_are_safe() {
 #[test]
 fn unknown_and_ambiguous_declarations_remain_diagnostics() {
     for source in [
-        "auto lambda = []() {};",
-        "MACRO(x) {}",
-        "int (*factory())(int) {}",
+        "auto lambda = []<class T>(T x) {};",
+        "int (*factory())(int) UNKNOWN_SUFFIX {}",
         "enum E { A = };",
         "class C : MACRO(x) {};",
     ] {
