@@ -46,6 +46,29 @@ end, not execution before every return.** No return interception is implied.
 See [advanced aliases](advanced-injections.md) for the separate RETURN, call,
 body overwrite and explicit-block wrap operations.
 
+## Macro-body targets
+
+For a source-level invocation with a body, select the macro and its exact argument
+texts instead of claiming it is an expanded function:
+
+```toml
+[[edits]]
+id = "test-body-head"
+file = "src/test/str_test.cpp"
+action = "INSERT"
+target = { kind = "macro_body", name = "TEST", arguments = ["Suite", "Case"] }
+position = "BODY_START"
+content = "/* extra test statements */"
+```
+
+Replace Suite/Case with arguments present in your checkout. `arguments` is optional
+only when the name matches exactly one macro body. Each argument is matched as
+trimmed source text, not evaluated C++. BEFORE/AFTER select the complete invocation
+and body; BODY_START/BODY_END select its brace boundaries. REPLACE/REMOVE act on
+the complete selected node. Structural diagnostics or ambiguous argument splitting
+cause failure. This does not expand macros or enable function injection aliases
+for names such as TEST.
+
 ## Injection content from files
 
 ```toml

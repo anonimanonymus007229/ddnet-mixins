@@ -23,19 +23,28 @@ public CComponent inheritance; see [component declarations](advanced-injections.
 
 ## C++ parsing and selectors
 
-Supported declaration patterns include simple namespaces/classes, qualified
-function definitions (including elaborated class/struct return types), common
-qualifiers/operators, simple template heads/types, noexcept expressions and
-trailing returns. Parenthesized/braced constructor member initializers are
-separated from the actual function body. Function-type template arguments such
-as std::function<bool(int, int)> are supported in return types.
+Supported declarations include qualified functions, common operators/conversions,
+noexcept expressions, trailing returns, standard/GNU/MSVC attributes and alignas.
+Recursive parenthesized declarators cover function-pointer returns and references
+to arrays. Template support includes default parameters, qualified specializations,
+common base initializers and parenthesized requires clauses; it is not a complete
+implementation of all C++ template/constraint grammar.
 
-Enums, scoped enums and their enumerators, anonymous struct/union declaration
-boundaries, and simple braced variable/array initializers are indexed separately
-rather than treated as unknown function bodies. Anonymous aggregate members do
-not receive invented globally qualified type names. Function-pointer declarators,
-arbitrary template expressions, anonymous namespaces and many macro-decorated
-declarations remain unsupported.
+Enums, aggregate typedef aliases, anonymous struct/union boundaries, braced
+variables and common lambda initializers have separate syntax nodes. Attributes,
+recognized annotation macros, constraints and linkage blocks retain source spans.
+A fixed annotation policy covers common thread-safety macros and selected bundled
+library annotations; arbitrary macro calls are not silently removed.
+
+Ordinary and inline namespaces are indexed. Anonymous namespaces use a synthetic
+`(anonymous@<byte-offset>)` scope to avoid merging distinct blocks. Generated
+identifiers containing `$` are accepted as a compiler extension. Helpers still
+have their stricter translation-unit-scope restrictions.
+
+Uppercase invocation forms followed by a body, such as TEST/TEST_F, are indexed
+as macro-body syntax—not expanded functions. Use the explicit
+[macro-body selector](edits.md#macro-body-targets) to edit them. No declarations
+or members produced by macro expansion are inferred.
 
 `inspect` emits a JSON inventory of supported nodes, unsupported regions and
 structural diagnostics. It returns nonzero if diagnostics occur, including in
@@ -44,9 +53,17 @@ Queries fail when lexical/structural errors or potentially matching unsupported
 regions prevent safe selection. Overloads require a more precise selector;
 `parameters` matches exact parenthesized source text, not normalized types.
 
-Preprocessor branches are preserved, not evaluated. Delimiter structure that
-diverges across branches can make a target unavailable. A successful corpus scan
-is not a complete semantic AST or proof that every construct can be edited.
+Preprocessor branches are preserved, not evaluated. Exact paired conditional
+extern-C wrappers with the same textual guard can be represented without choosing
+an active branch. Arbitrary delimiter changes across branches remain diagnostic.
+
+Alternative signatures sharing a body are recorded as conditional-function nodes;
+ordinary function selectors reject them until branch-aware editing is available.
+Directives inside enums are retained as opaque regions: included enumerators are
+not expanded. Include-generated constructor initializers, more complex conditional
+bodies and other unsupported macro-driven declarations can still block a target.
+A successful corpus scan is not a complete semantic AST or proof that every
+construct can be edited.
 
 ## Injection limits
 
