@@ -27,8 +27,9 @@ Supported declarations include qualified functions, common operators/conversions
 noexcept expressions, trailing returns, standard/GNU/MSVC attributes and alignas.
 Recursive parenthesized declarators cover function-pointer returns and references
 to arrays. Template support includes default parameters, qualified specializations,
-common base initializers and parenthesized requires clauses; it is not a complete
-implementation of all C++ template/constraint grammar.
+common base initializers, named/parenthesized requires clauses and requires
+expressions. Constrained overloads can be selected by exact constraint source
+text. This is not a complete implementation of all C++ template/constraint grammar.
 
 Enums, aggregate typedef aliases, anonymous struct/union boundaries, braced
 variables and common lambda initializers have separate syntax nodes. Attributes,
@@ -53,15 +54,22 @@ Queries fail when lexical/structural errors or potentially matching unsupported
 regions prevent safe selection. Overloads require a more precise selector;
 `parameters` matches exact parenthesized source text, not normalized types.
 
-Preprocessor branches are preserved, not evaluated. Exact paired conditional
-extern-C wrappers with the same textual guard can be represented without choosing
-an active branch. Arbitrary delimiter changes across branches remain diagnostic.
+Preprocessor branches are preserved, not evaluated. Delimiter analysis explores
+all branch arms and merges equivalent states. Tokens with multiple possible
+partners retain alternatives instead of guessed pairs. Enclosing bodies with
+unique boundaries can still be selected; invalid branches or excessive state
+expansion produce diagnostics. Exact paired conditional extern-C wrappers with
+the same textual guard are recognized separately.
 
-Alternative signatures sharing a body are recorded as conditional-function nodes;
-ordinary function selectors reject them until branch-aware editing is available.
-Directives inside enums are retained as opaque regions: included enumerators are
-not expanded. Include-generated constructor initializers, more complex conditional
-bodies and other unsupported macro-driven declarations can still block a target.
+Alternative signatures sharing one source body and constructors containing
+conditional/include-generated initializer fragments have explicit nodes. Ordinary
+function selectors reject these forms; use [body-region targets](edits.md#conditional-and-constructor-bodies)
+for edits confined to proven body boundaries. Directives inside enums/constructor
+headers remain opaque: included declarations/initializers are not expanded.
+Objective-C interface/implementation blocks embedded in platform headers are
+recorded as foreign regions, not C++ functions; no Objective-C edit selector is
+provided. Other unsupported or ambiguous macro-driven declarations can still
+block a target.
 A successful corpus scan is not a complete semantic AST or proof that every
 construct can be edited.
 

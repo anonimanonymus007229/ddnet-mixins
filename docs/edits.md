@@ -69,6 +69,42 @@ the complete selected node. Structural diagnostics or ambiguous argument splitti
 cause failure. This does not expand macros or enable function injection aliases
 for names such as TEST.
 
+## Conditional and constructor bodies
+
+For an include/conditional-dependent constructor header, select its proven body
+without replacing or expanding the initializer list:
+
+```toml
+target = { kind = "constructor_body", name = "CEditor::CEditor", parameters = "()" }
+```
+
+For platform-specific signatures sharing a single source body, explicitly list
+the complete set of alternative qualified names (duplicates do not matter):
+
+```toml
+target = { kind = "conditional_body", names = ["thread_run"] }
+```
+
+Use these in `[[edits]]` with BODY_START/BODY_END to insert statements. REPLACE
+or REMOVE selects the whole brace-delimited body, not any conditional header.
+The tool checks structural validity and that alternatives share exactly one
+source body. This is not selection of an active platform branch. C++ statements
+must be valid for every intended configuration. Ordinary function selectors and
+helper generation do not bypass the opaque header restriction.
+
+## Constrained overloads
+
+When parameter text alone does not disambiguate overloads, use a constrained
+function target with exact trimmed clause text, including the requires keyword:
+
+```toml
+target = { kind = "constrained_function", name = "f", parameters = "(T x)", constraint = "requires Concept<T>" }
+```
+
+This selects a normal complete function definition; before/after/body positions
+and replacement/removal use the same spans as a function target. Constraints are
+matched as source text, not evaluated, simplified or inferred from argument types.
+
 ## Injection content from files
 
 ```toml
