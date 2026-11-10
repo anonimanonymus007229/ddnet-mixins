@@ -93,6 +93,18 @@ fn every_indexed_client_function_has_paired_real_body_and_no_invalid_prefix() {
             let l = lex(&source);
             let index = parse(&source, &l);
             let st = mixins_parser::structure(&source, &l);
+            assert!(
+                index.diagnostics.is_empty(),
+                "{}: {:?}",
+                file.display(),
+                index.diagnostics
+            );
+            assert!(
+                index.unsupported.is_empty(),
+                "{}: {:?}",
+                file.display(),
+                index.unsupported
+            );
             for f in &index.functions {
                 count += 1;
                 let open = l

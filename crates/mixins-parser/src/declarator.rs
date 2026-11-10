@@ -85,6 +85,7 @@ impl Parser<'_> {
             body: self.span(body, close),
             line: self.token(begin).line,
             conditional: self.structure.conditional[self.sig[body]],
+            constraints: vec![],
         });
         true
     }

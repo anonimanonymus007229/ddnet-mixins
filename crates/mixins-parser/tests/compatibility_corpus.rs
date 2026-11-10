@@ -33,6 +33,13 @@ fn recovered_families_have_nodes_and_function_selectors() {
         i.select_function("CClient::DemoRecorders", None, &s)
             .unwrap();
         assert!(!i.conditional_functions.is_empty());
+        let s = fs::read_to_string(root.join("src/game/editor/editor.h")).unwrap();
+        let i = parse(&s, &lex(&s));
+        assert!(
+            i.constructor_regions
+                .iter()
+                .any(|n| n.qualified_name == "CEditor::CEditor")
+        );
         let s = fs::read_to_string(root.join("src/test/str_test.cpp")).unwrap();
         let i = parse(&s, &lex(&s));
         assert!(!i.macro_bodies.is_empty());

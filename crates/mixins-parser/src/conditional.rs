@@ -99,6 +99,7 @@ impl Parser<'_> {
                 body: self.span(open, close),
                 line: self.token(begin).line,
                 conditional: true,
+                constraints: f.constraints.iter().copied().map(map).collect(),
             });
             let _ = condition;
         }

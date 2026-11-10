@@ -4,8 +4,12 @@ mod aggregates;
 mod annotations;
 mod attributes;
 mod conditional;
+mod constraints;
+mod constructor_regions;
 mod declarations;
 mod declarator;
+mod delimiters;
+mod foreign;
 mod lambdas;
 mod macros;
 mod preprocessor;
@@ -13,7 +17,7 @@ pub mod syntax;
 use mixins_core::Diagnostic;
 use mixins_lexer::{Kind, Lexed, Token};
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Span {
@@ -28,6 +32,7 @@ pub struct Function {
     pub body: Span,
     pub line: u32,
     pub conditional: bool,
+    pub constraints: Vec<Span>,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct FunctionDeclaration {
@@ -89,6 +94,22 @@ pub struct MacroBody {
     pub body: Span,
 }
 #[derive(Debug, Clone, Serialize)]
+pub struct ForeignRegion {
+    pub language: String,
+    pub kind: String,
+    pub name: String,
+    pub declaration: Span,
+    pub bodies: Vec<Span>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct ConstructorRegion {
+    pub qualified_name: String,
+    pub declaration: Span,
+    pub parameters: Span,
+    pub body: Span,
+    pub opaque_regions: Vec<Span>,
+}
+#[derive(Debug, Clone, Serialize)]
 pub struct ConditionalFunction {
     pub declaration: Span,
     pub alternatives: Vec<Function>,
@@ -145,6 +166,8 @@ pub struct Index {
     pub lambdas: Vec<Lambda>,
     pub namespaces: Vec<Namespace>,
     pub conditional_functions: Vec<ConditionalFunction>,
+    pub constructor_regions: Vec<ConstructorRegion>,
+    pub foreign_regions: Vec<ForeignRegion>,
     pub diagnostics: Vec<Diagnostic>,
     pub unsupported: Vec<Diagnostic>,
 }
@@ -152,6 +175,7 @@ pub struct Index {
 pub struct Structure {
     pub pairs: Vec<Option<usize>>,
     pub conditional: Vec<bool>,
+    pub alternatives: BTreeMap<usize, Vec<usize>>,
     pub diagnostics: Vec<Diagnostic>,
 }
 fn text<'a>(s: &'a str, t: &Token) -> &'a str {
@@ -171,91 +195,7 @@ fn diag(t: &Token, code: &'static str, message: &str) -> Diagnostic {
 /// Pair only unambiguous delimiters. Branch-local pairs survive; pairs crossing
 /// divergent branch boundaries do not. No preprocessor branch is chosen active.
 pub fn structure(source: &str, lexed: &Lexed) -> Structure {
-    let mut out = Structure {
-        pairs: vec![None; lexed.tokens.len()],
-        conditional: vec![false; lexed.tokens.len()],
-        diagnostics: Vec::new(),
-    };
-    let linkage_pairs = preprocessor::linkage_pairs(source, lexed);
-    for (&open, &close) in &linkage_pairs {
-        out.pairs[open] = Some(close);
-    }
-    let mut stack: Vec<usize> = Vec::new();
-    let mut frames: Vec<Vec<usize>> = Vec::new();
-    let mut invalid = BTreeSet::new();
-    for (i, t) in lexed.tokens.iter().enumerate() {
-        out.conditional[i] = !frames.is_empty();
-        let word = text(source, t);
-        if t.kind == Kind::Directive {
-            let directive = word[1..]
-                .trim_start()
-                .split(|c: char| !c.is_ascii_alphabetic())
-                .next()
-                .unwrap_or("");
-            match directive {
-                "if" | "ifdef" | "ifndef" => frames.push(stack.clone()),
-                "elif" | "else" | "endif" => {
-                    if let Some(base) = frames.last() {
-                        if &stack != base {
-                            invalid.extend(stack.iter().chain(base.iter()).copied());
-                            out.diagnostics.push(diag(t, "STRUCT001", "delimiter structure diverges across preprocessor branches; enclosing targets unavailable"));
-                        }
-                        stack = base.clone();
-                    }
-                    if directive == "endif" {
-                        frames.pop();
-                    }
-                }
-                _ => {}
-            }
-            continue;
-        }
-        if t.kind != Kind::Punctuation || linkage_pairs.contains_key(&i) {
-            continue;
-        }
-        if matches!(word, "(" | "[" | "{") {
-            stack.push(i);
-        } else if matches!(word, ")" | "]" | "}") {
-            let base_depth = frames.last().map_or(0, Vec::len);
-            if let Some(&open) = stack.last() {
-                if stack.len() <= base_depth {
-                    invalid.insert(open);
-                    out.diagnostics.push(diag(
-                        t,
-                        "STRUCT001",
-                        "branch closes a delimiter opened outside its conditional",
-                    ));
-                } else if matches!(
-                    (text(source, &lexed.tokens[open]), word),
-                    ("(", ")") | ("[", "]") | ("{", "}")
-                ) {
-                    stack.pop();
-                    if !invalid.contains(&open) {
-                        out.pairs[open] = Some(i);
-                        out.pairs[i] = Some(open);
-                    }
-                } else {
-                    out.diagnostics
-                        .push(diag(t, "STRUCT002", "mismatched closing delimiter"));
-                }
-            } else {
-                out.diagnostics
-                    .push(diag(t, "STRUCT002", "unmatched closing delimiter"));
-            }
-        }
-    }
-    for i in stack {
-        if !invalid.contains(&i) {
-            out.diagnostics
-                .push(diag(&lexed.tokens[i], "STRUCT002", "unclosed delimiter"));
-        }
-    }
-    for i in invalid {
-        if let Some(j) = out.pairs[i].take() {
-            out.pairs[j] = None;
-        }
-    }
-    out
+    delimiters::build(source, lexed)
 }
 
 struct Parser<'a> {
@@ -326,6 +266,20 @@ impl Parser<'_> {
         let mut begin = start;
         while p < end {
             if p == begin {
+                if let Some(close) = self.foreign_region(begin, end) {
+                    p = close + 1;
+                    begin = p;
+                    continue;
+                }
+            }
+            if p == begin {
+                if let Some(close) = self.constructor_region(begin, end, scope) {
+                    p = close + 1;
+                    begin = p;
+                    continue;
+                }
+            }
+            if p == begin {
                 if let Some(close) = self.macro_declaration(begin, end) {
                     p = close + 1;
                     begin = p;
@@ -364,6 +318,12 @@ impl Parser<'_> {
                 continue;
             }
             if w == "{" {
+                if self.requires_body(begin, p) {
+                    if let Some(last) = self.close(p) {
+                        p = last + 1;
+                        continue;
+                    }
+                }
                 // Constructor member initializers can themselves contain braces.
                 // Resolve the full initializer grammar before declaring a body.
                 if let Some((body, close)) = self.constructor_body(begin, end, scope) {
@@ -584,14 +544,11 @@ impl Parser<'_> {
         if q < body && self.word(q) == "requires" {
             let first = q;
             q += 1;
-            if q >= body || self.word(q) != "(" {
-                return false;
-            }
-            let Some(end) = self.close(q) else {
+            let Some(end) = self.constraint_end(q, body) else {
                 return false;
             };
-            constraint_spans.push(self.span(first, end));
-            q = self.skip_attributes(end + 1, body);
+            constraint_spans.push(self.span(first, end - 1));
+            q = self.skip_attributes(end, body);
         }
         let declaration_start = q;
         let mut parameters = None;
@@ -754,14 +711,11 @@ impl Parser<'_> {
         if suffix < body && self.word(suffix) == "requires" {
             let first = suffix;
             suffix += 1;
-            if suffix >= body || self.word(suffix) != "(" {
-                return false;
-            }
-            let Some(end) = self.close(suffix) else {
+            let Some(end) = self.constraint_end(suffix, body) else {
                 return false;
             };
-            constraint_spans.push(self.span(first, end));
-            suffix = end + 1;
+            constraint_spans.push(self.span(first, end - 1));
+            suffix = end;
         }
         if suffix < body && self.word(suffix) == "->" {
             suffix += 1;
@@ -827,9 +781,12 @@ impl Parser<'_> {
         }
         self.record_attributes(begin, body);
         self.record_annotations(begin, body);
-        self.index
-            .constraints
-            .extend(constraint_spans.into_iter().map(|span| Constraint { span }));
+        self.index.constraints.extend(
+            constraint_spans
+                .iter()
+                .copied()
+                .map(|span| Constraint { span }),
+        );
         self.index.functions.push(Function {
             qualified_name: qualify(scope, &name),
             declaration: self.span(begin, close),
@@ -837,6 +794,7 @@ impl Parser<'_> {
             body: self.span(body, close),
             line: self.token(begin).line,
             conditional: self.structure.conditional[self.sig[body]],
+            constraints: constraint_spans,
         });
         true
     }
@@ -887,6 +845,8 @@ pub fn parse(source: &str, lexed: &Lexed) -> Index {
             lambdas: vec![],
             namespaces: vec![],
             conditional_functions: vec![],
+            constructor_regions: vec![],
+            foreign_regions: vec![],
             diagnostics,
             unsupported: vec![],
         },
@@ -906,6 +866,24 @@ impl Index {
         parameters: Option<&str>,
         source: &str,
     ) -> Result<&Function, String> {
+        self.select_function_constrained(name, parameters, None, source)
+    }
+    pub fn select_function_constrained(
+        &self,
+        name: &str,
+        parameters: Option<&str>,
+        constraint: Option<&str>,
+        source: &str,
+    ) -> Result<&Function, String> {
+        if self
+            .constructor_regions
+            .iter()
+            .any(|n| n.qualified_name == name)
+        {
+            return Err(format!(
+                "target {name}: opaque constructor initializer regions; use explicit constructor_body target for body-only edits"
+            ));
+        }
         if !self.diagnostics.is_empty() {
             return Err(
                 "source has structural/lexical diagnostics; function selection refused".into(),
@@ -944,6 +922,11 @@ impl Index {
             .iter()
             .filter(|f| {
                 f.qualified_name == name
+                    && constraint.is_none_or(|query| {
+                        f.constraints
+                            .iter()
+                            .any(|s| source[s.start..s.end].trim() == query.trim())
+                    })
                     && parameters.is_none_or(|p| {
                         source[f.parameters.start..f.parameters.end].trim() == p.trim()
                     })
@@ -956,7 +939,7 @@ impl Index {
                 self.unsupported.len()
             )),
             _ => Err(format!(
-                "target {name}: {} matches; supply exact parenthesized parameters",
+                "target {name}: {} matches; supply exact parenthesized parameters and/or constraint text",
                 matches.len()
             )),
         }

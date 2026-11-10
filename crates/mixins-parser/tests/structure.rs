@@ -26,7 +26,7 @@ fn divergent_branches_cannot_be_selected() {
         "#if A\nvoid f() {\n#else\nvoid f() {\n#endif\n}",
     ] {
         let index = parse(source, &lex(source));
-        assert!(!index.diagnostics.is_empty());
+        assert!(!index.diagnostics.is_empty() || !index.unsupported.is_empty());
         assert!(index.select_function("f", None, source).is_err());
     }
 }
