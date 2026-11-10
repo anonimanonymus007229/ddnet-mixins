@@ -46,6 +46,18 @@ pub enum Target {
         callee: String,
         argument: Option<usize>,
     },
+    ConditionalBody {
+        names: Vec<String>,
+    },
+    ConstrainedFunction {
+        name: String,
+        parameters: Option<String>,
+        constraint: String,
+    },
+    ConstructorBody {
+        name: String,
+        parameters: Option<String>,
+    },
     MacroBody {
         name: String,
         arguments: Option<Vec<String>>,
@@ -326,6 +338,82 @@ impl Plan {
                             call
                         };
                         (selected, None)
+                    }
+                    Target::ConditionalBody { names } => {
+                        if !index.diagnostics.is_empty() || names.is_empty() {
+                            return Err("conditional-body selection requires valid structure and explicit alternative names".into());
+                        }
+                        let expected: std::collections::BTreeSet<_> = names.iter().collect();
+                        let found: Vec<_> = index
+                            .conditional_functions
+                            .iter()
+                            .filter(|node| {
+                                node.alternatives
+                                    .iter()
+                                    .map(|f| &f.qualified_name)
+                                    .collect::<std::collections::BTreeSet<_>>()
+                                    == expected
+                            })
+                            .collect();
+                        match found.as_slice() {
+                            [node] => {
+                                let body = node.alternatives[0].body;
+                                if !node.alternatives.iter().all(|f| f.body == body) {
+                                    return Err(
+                                        "conditional alternatives do not share one source body"
+                                            .into(),
+                                    );
+                                }
+                                (body, Some(body))
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "conditional body {names:?}: {} matches",
+                                    found.len()
+                                ));
+                            }
+                        }
+                    }
+                    Target::ConstrainedFunction {
+                        name,
+                        parameters,
+                        constraint,
+                    } => {
+                        let f = index.select_function_constrained(
+                            name,
+                            parameters.as_deref(),
+                            Some(constraint),
+                            source,
+                        )?;
+                        (f.declaration, Some(f.body))
+                    }
+                    Target::ConstructorBody { name, parameters } => {
+                        if !index.diagnostics.is_empty() {
+                            return Err(
+                                "constructor-body selection requires valid structural source"
+                                    .into(),
+                            );
+                        }
+                        let found: Vec<_> = index
+                            .constructor_regions
+                            .iter()
+                            .filter(|n| {
+                                &n.qualified_name == name
+                                    && parameters.as_ref().is_none_or(|p| {
+                                        p.trim()
+                                            == source[n.parameters.start..n.parameters.end].trim()
+                                    })
+                            })
+                            .collect();
+                        match found.as_slice() {
+                            [node] => (node.body, Some(node.body)),
+                            _ => {
+                                return Err(format!(
+                                    "constructor body {name}: {} matches",
+                                    found.len()
+                                ));
+                            }
+                        }
                     }
                     Target::MacroBody { name, arguments } => {
                         if !index.diagnostics.is_empty() {
