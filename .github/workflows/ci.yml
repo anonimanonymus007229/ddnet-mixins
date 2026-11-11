@@ -44,6 +44,8 @@ jobs:
           path: workspace/ddnet
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace --locked -- --ignored --nocapture
+        env:
+          DDMIX_TEST_DDNET: ${{ github.workspace }}/workspace/ddnet
   ddnet-windows-build:
     runs-on: windows-latest
     steps:
