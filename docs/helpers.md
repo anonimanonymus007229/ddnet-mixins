@@ -112,8 +112,9 @@ with type arguments; use typedefs for arrays/function pointers/complex types.
 Values must be balanced expression text, with no directives, comments, semicolons
 or blocks. These checks are conservative syntax guards, not full type checking.
 
-Helpers currently require an unconditional, out-of-class function definition at
-translation-unit scope in a `.cpp` file. Inline class definitions, namespace or
+Helper generation has stricter requirements than source parsing: it requires an
+unconditional, out-of-class function definition at translation-unit scope in a
+`.cpp` file. Inline class definitions, namespace or
 extern blocks, template declaration heads and conditionally defined targets are
 rejected. Scoped types must be fully qualified where needed because the helper
 is a free function, not a class member. Preprocessor directives inside helper

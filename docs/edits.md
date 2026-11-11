@@ -165,6 +165,9 @@ structural errors and potentially matching unsupported regions cause a failure,
 not a guessed insertion. Function selectors choose definitions with real bodies,
 not declaration-only/defaulted/deleted methods.
 
-The tool does not type-check snippets or expand macros. See
-[compatibility](compatibility.md#c-parsing-and-selectors) for grammar and
-preprocessor restrictions. Staged application never writes to the original input.
+The checked client source trees parse without warnings, but individual edits
+still need a unique target and the appropriate selector for conditional or opaque
+regions. The tool does not type-check snippets or expand macros. See
+[compatibility](compatibility.md#c-parsing-and-selectors) for the distinction
+between source coverage and edit support. Staged application never writes to the
+original input.

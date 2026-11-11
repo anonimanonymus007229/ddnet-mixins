@@ -4,11 +4,11 @@ Create DDNet mods as separate packages and apply them without editing the origin
 
 `ddmix` reads TOML manifests, inserts code into supported C++ functions or around comments, and connects mod-owned client sources to DDNet's CMake target. It prepares a separate working copy for compilation, so mod developers can keep their changes outside upstream source files.
 
-**Early development:** the parser covers a subset of C++ and rejects targets it cannot resolve safely. Check the [compatibility limits](docs/compatibility.md) before choosing a DDNet revision or injection type.
+The custom C++ structural parser covers the complete source trees of the checked DDNet, BestClient, RushieClient and TaterClient revisions with **zero parser warnings or unsupported regions**. Parsing coverage does not imply unrestricted rewriting or C++ type checking; see [client compatibility and edit limits](docs/compatibility.md).
 
 ## Quick start
 
-Requires Rust/Cargo to build `ddmix`. The example below uses the DDNet revision covered by the integration tests; newer revisions may contain unsupported syntax.
+Requires Rust/Cargo to build `ddmix`. The example below uses the DDNet revision pinned by the integration tests. For other clients, pass their checkout path; see the [checked revisions](docs/compatibility.md#ddnet-versions-and-build-targets).
 
 ```sh
 git clone https://github.com/anonimanonymus007229/ddnet-mixins.git
@@ -111,7 +111,7 @@ Use `[[components]]` with a `members = [{ class, header, member }, ...]` array
 for a group sharing `register_in`, or `[[component]]` with a single `member`
 and optional `priority`. BEFORE_CALL, AFTER_CALL, MODIFY_ARG, RETURN, OVERWRITE and explicit-block WRAP are available with conservative restrictions. Config edits are checked for identifier/console-name collisions. See the [advanced feature guide](docs/advanced-injections.md).
 
-Dependencies have deterministic ordering; compatibility and dependency version constraints currently accept only `*`. The parser covers a subset of C++ and explicitly reports unsupported regions. `check` validates selectors, conflicts and structural CMake placement—it does not run a compiler or validate snippet semantics.
+Dependencies have deterministic ordering; compatibility and dependency version constraints currently accept only `*`. `check` validates selectors, conflicts and structural CMake placement—it does not run a compiler or validate snippet semantics. New or ambiguous source constructs still produce diagnostics rather than guessed edits.
 
 Any rule table can select client folders with
 `clients = { include = ["TClient", "RushieClient-*"], exclude = ["OldClient"] }`.
@@ -132,7 +132,7 @@ See [client-specific rules](docs/client-filters.md). Generic edits also accept
 
 ## Development
 
-Rust/Cargo, CMake and a C++ compiler are needed for the regular test suite. The explicit corpus tests also require a real DDNet checkout at `workspace/ddnet`, or at the path set by `DDMIX_TEST_DDNET`.
+Rust/Cargo, CMake and a C++ compiler are needed for the regular test suite. The explicit corpus tests also require a real DDNet checkout at `workspace/ddnet`. To use another location, set `DDMIX_TEST_DDNET` to its absolute path before running the ignored tests; CI sets this variable explicitly.
 
 ```sh
 cargo test --workspace --locked

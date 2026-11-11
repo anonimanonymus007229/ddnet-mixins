@@ -36,9 +36,11 @@ available counts for mods, injections, components, edits, modified/copied files,
 warnings and skips. Failed operations may have partial counts.
 
 Verbose messages identify mod/edit IDs and source locations. Disabled packages
-are explicitly marked skipped. Parser coverage warnings do not mean that the
-C++ is invalid; use `inspect` JSON or verbose output to locate unsupported regions.
-See [compatibility](compatibility.md#c-parsing-and-selectors).
+are explicitly marked skipped. The [checked client revisions](compatibility.md#ddnet-versions-and-build-targets)
+scan without parser warnings. On another revision, a parser coverage warning
+means the tool encountered a construct outside its supported grammar, not that
+the C++ is invalid. Use inspect JSON or verbose output to locate it. A skipped
+client-specific rule is separate from a parser warning.
 
 ## Build logs and errors
 

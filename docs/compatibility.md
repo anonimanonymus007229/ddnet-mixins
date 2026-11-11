@@ -1,19 +1,41 @@
-# Compatibility and limitations
+# Client compatibility and edit limits
 
-DDNet Mixins is in early development. It parses a subset of C++ and does not
-expand macros or type-check snippets. A successful `check` means selectors,
-conflicts and structural CMake placement are valid—not that the client compiles.
-Use `build` to validate the result with DDNet's toolchain.
+The C++ structural parser covers every source/header file in the client revisions
+listed below without parser warnings, unsupported regions or structural errors.
+This describes source coverage, not universal conformance to every C++ standard
+construct. The tool does not expand macros or type-check snippets. A successful
+`check` validates selectors, conflicts and structural CMake placement—not client
+compilation. Use `build` to validate the result with the client's toolchain.
 
 ## DDNet versions and build targets
 
-The reference DDNet revision is
-[`176fc2f9ab85ace703c6ec10da0249b01995ba94`](https://github.com/ddnet/ddnet/commit/176fc2f9ab85ace703c6ec10da0249b01995ba94).
-For a separate dependency checkout, the corresponding ddnet-libs revision is
+Full `.cpp`/`.h` source scans pass with zero parser warnings and unsupported
+regions on these revisions:
+
+| Client | Revision |
+|---|---|
+| DDNet | `176fc2f9ab85ace703c6ec10da0249b01995ba94` |
+| BestClient | `a16988e3b7e99d219ca2741064c3ba5a121fa706` |
+| RushieClient | `3da152d2f89b8c3e00ac057aea1c5ca213c7fa2f` |
+| TaterClient (TClient) | `087d4ae5ab7266f3afc4fe6d46a579eff83234f6` |
+
+Check your own checkout before applying mods:
+
+```sh
+ddmix inspect --ddnet /path/to/client > index-report.json
+ddmix check --ddnet /path/to/client --mods /path/to/mods
+```
+
+Parser compatibility does not guarantee a particular mod's selectors or build
+requirements match every client. Folder-specific rules can select different
+layouts; see [client filters](client-filters.md).
+
+For the reference DDNet checkout, the corresponding ddnet-libs revision is
 [`c0e6703fbcdbe03df2f26875427ec3951ce4ec21`](https://github.com/ddnet/ddnet-libs/commit/c0e6703fbcdbe03df2f26875427ec3951ce4ec21).
-Other revisions may work, but changes to declarations, component collections or
-CMake structure can make selectors fail. Compatibility and dependency version
-constraints currently accept only `*`; this does not guarantee compatibility.
+Other revisions require their own scan/check. Changes to declarations, component
+collections or CMake structure can make mod selectors fail even when parsing
+succeeds. Compatibility and dependency version constraints currently accept
+only `*`; this does not guarantee compatibility.
 
 Only mod files under `src/game/client/**` map automatically to `game-client`.
 Server, engine, shared and tool target mappings are not supported. Mod overlays
@@ -29,7 +51,8 @@ Recursive parenthesized declarators cover function-pointer returns and reference
 to arrays. Template support includes default parameters, qualified specializations,
 common base initializers, named/parenthesized requires clauses and requires
 expressions. Constrained overloads can be selected by exact constraint source
-text. This is not a complete implementation of all C++ template/constraint grammar.
+text. Template/constraint source is indexed without evaluating concepts or
+resolving types.
 
 Enums, aggregate typedef aliases, anonymous struct/union boundaries, braced
 variables and common lambda initializers have separate syntax nodes. Attributes,
@@ -68,10 +91,11 @@ for edits confined to proven body boundaries. Directives inside enums/constructo
 headers remain opaque: included declarations/initializers are not expanded.
 Objective-C interface/implementation blocks embedded in platform headers are
 recorded as foreign regions, not C++ functions; no Objective-C edit selector is
-provided. Other unsupported or ambiguous macro-driven declarations can still
-block a target.
-A successful corpus scan is not a complete semantic AST or proof that every
-construct can be edited.
+provided. These opaque/foreign regions are explicitly represented syntax, not
+unsupported parser regions. They require the relevant selector or remain outside
+the supported edit model. New unsupported or ambiguous constructs still block
+unsafe queries. A complete source scan is not a semantic compiler AST or proof
+that every construct can be rewritten.
 
 ## Injection limits
 

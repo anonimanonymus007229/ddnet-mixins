@@ -90,4 +90,4 @@ unrelated parent repository. Copy staging excludes original Git metadata.
 
 Build output and the complete `ddmix-configure.log` / `ddmix-build.log` transcripts
 live in the build directory. See [logging](logging.md) for verbosity and error
-output, and [compatibility](compatibility.md) for unsupported constructs.
+output, and [compatibility](compatibility.md) for checked clients and edit limits.

@@ -3,8 +3,9 @@
 All aliases resolve against original spans and lower to INSERT/REPLACE/REMOVE.
 HEAD/TAIL additionally support [separate void helpers with bindings](helpers.md);
 the body is loaded from hooks/ and both the free function and call are generated.
-See `examples/advanced-hooks/mixin.toml` for real-DDNet examples. This version
-supports a deliberately bounded subset, not arbitrary C++ rewriting.
+See `examples/advanced-hooks/mixin.toml` for real-DDNet examples. The restrictions
+below apply to transformations, independently of complete source parsing on the
+[checked clients](compatibility.md#ddnet-versions-and-build-targets).
 
 | Kind | Meaning and restrictions |
 |---|---|
@@ -88,5 +89,5 @@ mutually exclusive and do not conflict; no macro expression is evaluated. Two
 separate #if expressions are conservatively considered able to coexist.
 Macro argument splitting uses tokens and delimiter pairs, not comma splitting.
 
-For supported C++ patterns and target restrictions, see
-[compatibility and limitations](compatibility.md).
+For checked clients, source coverage and target restrictions, see
+[client compatibility and edit limits](compatibility.md).
