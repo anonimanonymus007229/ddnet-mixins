@@ -464,6 +464,37 @@ fn inventory(root: &Path) -> Result<BTreeMap<String, String>> {
     }
     Ok(entries)
 }
+// CPython writes these disposable artifacts next to generators during CMake
+// builds. Only recognize cache files with an inventoried .py source; unrelated
+// files and caches already present in the inventory remain fully protected.
+fn python_cache_source(relative: &str) -> Option<String> {
+    let path = Path::new(relative);
+    path.strip_prefix("staging/ddnet").ok()?;
+    let cache_dir = path.parent()?;
+    if cache_dir.file_name()? != "__pycache__" {
+        return None;
+    }
+    let filename = path.file_name()?.to_str()?.strip_suffix(".pyc")?;
+    let (module, tag) = filename.rsplit_once(".cpython-")?;
+    let version = if let Some((version, optimization)) = tag.split_once(".opt-") {
+        if !matches!(optimization, "1" | "2") {
+            return None;
+        }
+        version
+    } else {
+        tag
+    };
+    if module.is_empty() || version.is_empty() || !version.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(
+        cache_dir
+            .parent()?
+            .join(format!("{module}.py"))
+            .to_string_lossy()
+            .replace('\\', "/"),
+    )
+}
 fn validate_owned(root: &Path) -> Result<()> {
     if io(fs::symlink_metadata(root))?.file_type().is_symlink() {
         return Err("tool output must not be a symlink".into());
@@ -480,8 +511,26 @@ fn validate_owned(root: &Path) -> Result<()> {
     if state.owner != "ddnet-mixins" || state.version != 1 {
         return Err("unrecognized .ddmix ownership state".into());
     }
-    if inventory(root)? != state.files {
+    let mut actual = inventory(root)?;
+    let caches: Vec<_> = actual
+        .keys()
+        .filter(|relative| {
+            !state.files.contains_key(*relative)
+                && python_cache_source(relative)
+                    .is_some_and(|source| state.files.contains_key(&source))
+        })
+        .cloned()
+        .collect();
+    for cache in &caches {
+        actual.remove(cache);
+    }
+    if actual != state.files {
         return Err("staging/output was modified outside ddmix; preserve your changes and remove .ddmix manually before regeneration".into());
+    }
+    // Verify everything before deleting anything. Never retain unverified
+    // bytecode that a subsequent Python invocation could accidentally execute.
+    for cache in caches {
+        io(fs::remove_file(root.join(cache)))?;
     }
     Ok(())
 }
